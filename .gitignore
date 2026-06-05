@@ -1,14 +1,19 @@
+# Node
 node_modules/
-.env
-.env.local
-__pycache__/
-*.pyc
-.venv/
-venv/
 dist/
-build/
+.vite/
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# OS
 .DS_Store
 Thumbs.db
-.vscode/settings.json
-.idea/
-*.log
+
+# Bundled binaries (download per-platform; not committed)
+binaries/
+
+# Local data
+*.part
+downpour-data/

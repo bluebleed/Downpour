@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body {
+        width: 220px;
+        font-family: system-ui, sans-serif;
+        padding: 12px;
+        margin: 0;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 10px;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+      .hint {
+        margin-top: 10px;
+        font-size: 11px;
+        color: #777;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🌧️ Downpour Capture</h1>
+    <label>
+      <input type="checkbox" id="enabled" />
+      Capture downloads
+    </label>
+    <p class="hint" id="status">Checking connection…</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

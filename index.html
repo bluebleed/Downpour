@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Downpour</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>🌧️ Downpour</h1>
+      <form id="add-form" class="add-form">
+        <input
+          id="url-input"
+          type="url"
+          placeholder="Paste a download URL…"
+          autocomplete="off"
+          required
+        />
+        <button type="submit">Download</button>
+      </form>
+    </header>
+
+    <main>
+      <ul id="downloads" class="downloads">
+        <li class="empty">No downloads yet. Paste a URL above to start.</li>
+      </ul>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
