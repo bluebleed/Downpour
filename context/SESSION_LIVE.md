@@ -1287,3 +1287,326 @@ One thing to know: categorization runs **on completion** (the file is moved righ
 ```
 - Auto-categorize media (yt-dlp) downloads into category folders using captured output path
 ```
+
+### 2026-06-07 17:39:29 — You
+which website social websites our downloader support ? Discuss
+
+### 2026-06-07 17:40:13 — Claude
+Good question — and the honest answer is that **Downpour itself doesn't maintain a site list**. Support is determined by the two download engines under the hood, so it's worth separating them:
+
+## 1. The HTTP engine (any direct link)
+The segmented downloader handles **any direct file URL** — `.zip`, `.pdf`, `.mp4`, installers, etc. Combined with the browser extension's capture, this works on *any* website that serves a real downloadable file (file hosts, CDNs, email attachments, direct media links). It's not "social-site aware"; it just grabs whatever URL it's given, with cookies/referer forwarded by the extension so authenticated/direct links work.
+
+## 2. The Media engine = whatever **yt-dlp** supports
+The **Media** tab is a thin wrapper around `yt-dlp`, so its reach is exactly yt-dlp's extractor list — **~1,800+ sites**. The well-known social/streaming ones include:
+
+- **YouTube** (videos, shorts), **Vimeo**, **Dailymotion**
+- **X/Twitter**, **Instagram**, **Facebook**, **TikTok**, **Reddit**
+- **Twitch** (VODs/clips), **SoundCloud**, **Bandcamp**
+- **Bilibili**, **Rumble**, **Odysee**, news/broadcaster sites, and many more
+
+You can see the exact, current list with `yt-dlp --list-extractors` — that's the source of truth, and it updates whenever yt-dlp updates.
+
+## Important limits — by design and by current wiring
+
+These are specific to *this* app, not yt-dlp in general:
+
+- **No DRM / paywall bypass.** The responsible-use guard hard-blocks `--allow-unplayable-formats`, `--geo-bypass*`, and `--cookies-from-browser`. So **Netflix, Disney+, Spotify, Prime, etc.** (DRM-protected) are intentionally **not** supported. The UI even says *"Only download media you are permitted to access."*
+- **Login / private content is limited right now.** The Media tab currently extracts with **no cookies** passed, so anything requiring a logged-in session (private Instagram, members-only, age-gated/region-locked videos) will likely fail until we add a way to supply cookies. The backend already supports forwarding cookies as a header — it's just not exposed in the UI yet.
+- **Single video only.** `--no-playlist` is forced, so pasting a playlist/channel URL grabs just that one video, not the whole list.
+- **Live streams** are hit-or-miss (depends on the site and yt-dlp), and we don't have special handling for them.
+
+## So, practically
+- "Does it support YouTube/X/Instagram/TikTok/etc.?" → **Yes, public content**, via the Media tab.
+- "Does it support Netflix/Spotify/DRM?" → **No, deliberately.**
+- "Login-required stuff?" → **Not yet** (needs a cookie input we haven't built).
+
+If you'd like, I can add a **cookie / "use browser session" input** to the Media tab (passed safely as a header, never via the blocked `--cookies-from-browser`) so login-gated public content you're entitled to becomes downloadable. Want me to scope that?
+
+### 2026-06-07 17:45:20 — You
+Can we add support for downloading Netflix etc videos for our personal purpose ? Discuss and I think we should. with additional Tab of Netflix and other websites we will add. Further we should also add youtube playlist download.  DIscuss Only.
+
+### 2026-06-07 17:46:11 — Claude
+I'll split this into the two halves, because they're very different.
+
+## Netflix / DRM streaming — I'm going to push back on this one
+
+I don't think we should add this, and I won't build it — not because it's hard, but because of what it actually requires.
+
+**The technical reality:** Netflix, Disney+, Prime, Spotify, etc. wrap their content in **DRM** (Widevine/PlayReady/FairPlay). There's no "download URL" to grab — the video is encrypted, and the only way to save it is to **circumvent the DRM**: extract a Widevine decryption key (CDM), strip the protection, and decrypt the stream. yt-dlp — our entire media engine — deliberately **cannot** do this; you'd have to bolt on a separate key-extraction/decryption toolchain whose sole purpose is breaking copy protection.
+
+**The legal reality:** "for personal use" unfortunately doesn't change this. Circumventing DRM is prohibited in its own right under anti-circumvention law (DMCA §1201 in the US, the EU Copyright Directive, and equivalents elsewhere) — independent of whether you'd otherwise have a fair-use/personal-copy argument. It also directly violates Netflix's Terms of Service. And it's the exact thing this project's own responsible-use boundary already forbids — the `FORBIDDEN_FLAGS` guard blocks DRM-bypass flags on purpose.
+
+So this isn't a missing feature; it's a line the project intentionally draws, and I'll keep it there. A "Netflix tab" would just be a wrapper around a DRM cracker, which I won't add.
+
+**The legitimate way to do what you want:** Netflix already supports **offline downloads inside their own apps** (mobile/Windows app) precisely for personal offline viewing — that's the sanctioned path, no circumvention needed.
+
+What I'm *happy* to build instead, if useful:
+- **More DRM-free platforms** with nicer per-platform UX (the "tabs" idea is great for legit sites — Vimeo, SoundCloud, etc.).
+- **Cookie / session support** so you can download login-gated content *you're entitled to* (your own private uploads, member content you have rights to) — passed safely as a header, never via the blocked browser-cookie extraction.
+
+## YouTube playlist download — yes, absolutely, let's do this
+
+This one's completely fine (public content, no DRM) and a natural fit. Here's how I'd approach it:
+
+**Extraction:** Drop the forced `--no-playlist` for playlist URLs and use `yt-dlp --flat-playlist --dump-json` to quickly enumerate every entry (title, id, duration, thumbnail) *without* fetching each video's full format list — that keeps it fast even for 200-item playlists.
+
+**UX:** When the pasted URL is a playlist (or channel), show a **checklist** of entries instead of the single-video card: select all / deselect, pick a default quality (Best / 1080p / 720p / Audio-only) that applies to the batch, then **Download selected** → each becomes its own queued `Media` download, respecting `max_concurrent` and auto-categorizing into `Videos/` like normal.
+
+**Things to decide:**
+- **Per-item vs. batch format:** fetching individual formats for every entry is slow, so a batch quality preset (using selectors like `bestvideo[height<=1080]+bestaudio/best`) is the practical default; per-item format picking could be an "advanced" expansion.
+- **Channel URLs / very large lists:** cap or paginate enormous channels, and let the user pick a range.
+- **Naming:** optionally prefix with playlist index (`01 - Title.mp4`) so order is preserved on disk.
+- **Audio playlists:** an "audio only" batch mode is a nice extra for music playlists.
+
+Want me to plan the playlist feature in detail (extraction + the checklist UI + batch enqueue) as the next piece of work?
+
+### 2026-06-07 17:51:27 — You
+yes Plan first
+
+### 2026-06-07 17:51:41 — Claude
+Let me ground the plan in the actual media-view structure before laying it out.
+
+### 2026-06-07 17:52:57 — Claude
+Here's the implementation plan. No code yet — this is the design for your review.
+
+## Goal
+Paste a playlist (or channel) URL → see a checklist of its videos → pick a quality + select which ones → batch-enqueue them as normal media downloads (audio-merged, auto-categorized to `Videos/`).
+
+## Architecture decision: keep it flat + use presets
+The key insight that keeps this fast: a 200-item playlist must **not** fetch the full format list for every video (that's 200 slow yt-dlp calls). So:
+- **Enumerate** with `yt-dlp --flat-playlist --dump-json` → one fast call, returns id/title/duration/index per entry, **no per-video formats**.
+- **Download** each selected entry using a **format-selector preset** (e.g. `bestvideo[height<=1080]+bestaudio/best`) rather than a specific `format_id` — our existing `start_media_download` already passes whatever it's given to yt-dlp's `-f`, so presets "just work."
+
+## Backend
+
+**1. New types** (`media_extractor.rs`)
+- `PlaylistEntry { url, title, duration, index }`
+- `PlaylistInfo { title, uploader, entries: Vec<PlaylistEntry> }`
+
+**2. New extractor method** `extract_playlist(url, cookies)`
+- Runs `yt-dlp --flat-playlist --dump-json --no-warnings <url>` (one JSON object per line).
+- Pure parser `playlist_from_jsonl(&str) -> PlaylistInfo` (side-effect-free → unit-testable, like the existing `parse_progress_line`).
+
+**3. New command** `extract_playlist_info(url, cookies)` in `lib.rs`, registered in the handler list. Single-video extraction stays on the existing `extract_media_info`.
+
+**4. Batch enqueue** — add `start_media_batch(entries, format_selector, audio_only, index_prefix)`:
+- Loops the selected entries, enqueuing each as a `Media` download (reusing the existing path).
+- Sets each item's **display name** = entry title, **`output_template`** = `"%(title)s.%(ext)s"` (or `"{NN} - %(title)s.%(ext)s"` when index-prefix is on — yt-dlp handles literal+template mixing), **`media_format_id`** = the preset selector.
+- One IPC call instead of N; partial failures don't abort the rest.
+- Each item then flows through the normal scheduler → `max_concurrent` → audio merge → `--print-to-file` naming → auto-categorize to `Videos/`. **No changes needed downstream** — that's the payoff of all the recent work.
+
+## Frontend (`index.html` + `main.js`)
+
+**5. URL routing** — `isPlaylistUrl(url)` heuristic (`list=`, `/playlist`, `/channel/`, `/@`, `/c/`, `/user/`). The Extract handler branches: playlist → `extract_playlist_info` + checklist panel; otherwise the current single-video panel.
+
+**6. New checklist panel** (`#playlist-info`, parallel to `#media-info`):
+- Header: playlist title + "N videos".
+- Controls: **Select all / none**, a **quality preset** dropdown (Best / 1080p / 720p / Audio only), and an **index-prefix** checkbox.
+- Scrollable rows: checkbox · index · title · duration.
+- **"Download selected (N)"** button → calls `start_media_batch`, then resets the panel (same reset behavior we just added for single videos) and toasts "Queued N downloads."
+
+**7. Quality presets** map to yt-dlp selectors, e.g. 1080p → `bestvideo[height<=1080]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best`; Audio only → `bestaudio[ext=m4a]/bestaudio`.
+
+## Tests
+- Unit test for `playlist_from_jsonl` (sample flat-playlist JSON → entries), no network.
+- I'll verify the chosen preset selectors actually resolve by running yt-dlp against a real public playlist before finalizing (like I did for the merge/print-to-file work).
+
+## Open decisions I'd like your call on
+1. **`watch?v=…&list=…` (a video inside a playlist):** treat as single video by default, with a "Download whole playlist instead" option? Or always offer the checklist when `list=` is present?
+2. **Large playlists/channels:** soft-cap with a warning (e.g. "This has 1,200 videos — load first 100 / load all / pick a range")? I'd suggest a cap of ~200 with "load all" override.
+3. **Default quality preset:** I'd default to **1080p** (good size/quality balance) with the others available. OK?
+4. **Index prefix** (`01 - Title.mp4`): default **off**, opt-in? (Keeps playlist order on disk when on.)
+
+If you confirm those four, I'll build it in this order: backend extractor + parser + tests → batch command → frontend checklist UI → verify with a real public playlist. Want me to proceed?
+
+### 2026-06-07 17:59:30 — You
+Keeps playlist order on disk when on, default to 1080p, soft-cap with a warning,treat as single video by default, with a "Download whole playlist instead" option
+
+### 2026-06-07 18:00:51 — Claude
+All four confirmed. Before writing the parser, let me ground it in yt-dlp's actual `--flat-playlist` JSON shape (using a controlled `ytsearch` "playlist" so I see the real field names):
+
+### 2026-06-07 18:17:53 — Claude
+Confirmed the fields: `url` (full re-feedable URL), `title`, `duration`, `playlist_index`, `playlist_title`. Each line is one entry. Let me build it. Setting up a task list:
+
+### 2026-06-07 18:18:18 — Claude
+Now the parser, next to `media_info_from_json`:
+
+### 2026-06-07 18:18:31 — Claude
+Now the parser test, and the `extract_playlist` method. First the test:
+
+### 2026-06-07 18:18:47 — Claude
+Now the `extract_playlist` method. Let me add the timeout constant and the method after `extract_info`:
+
+### 2026-06-07 18:19:24 — Claude
+Now the lib.rs commands. Let me update imports and add the two commands:
+
+### 2026-06-07 18:19:55 — Claude
+Backend done. Let me compile and test before the frontend:
+
+### 2026-06-07 18:21:55 — Claude
+Backend green — 195 tests pass (2 new playlist parser tests), clippy clean. Now the frontend. Updating todos and adding the playlist panel HTML:
+
+### 2026-06-07 18:22:19 — Claude
+Now the CSS. Let me find the media styles to place the playlist styles nearby:
+
+### 2026-06-07 18:22:54 — Claude
+Now the JavaScript. Let me find the media element declarations to add the playlist refs:
+
+### 2026-06-07 18:23:17 — Claude
+Now the URL routing + playlist logic. Let me read the current media form submit handler:
+
+### 2026-06-07 18:23:41 — Claude
+Now I'll rewrite the submit handler to route playlist vs single, and add all the playlist functions. Replacing the submit handler:
+
+### 2026-06-07 18:23:58 — Claude
+Let me fix two things: move the change-listener to one-time registration (it's inside `renderPlaylist`, which would stack duplicates), and update `resetMediaForm` to clear the playlist panel:
+
+### 2026-06-07 18:24:39 — Claude
+Now verify: final clippy/test, plus a real yt-dlp run confirming the **preset selector + index-prefix template** name files correctly:
+
+### 2026-06-07 18:26:53 — Claude
+Verified end-to-end: the 1080p preset selector merges video+audio into **`01 - Me at the zoo.mp4`** — index prefix and mp4 output both correct. Clippy clean, 195 tests pass. Let me close out the todos.
+
+### 2026-06-07 18:27:11 — Claude
+YouTube playlist download is built and verified. Here's the summary.
+
+## What's implemented (all 4 decisions honored)
+
+**Backend** ([media_extractor.rs](src-tauri/src/media_extractor.rs), [lib.rs](src-tauri/src/lib.rs))
+- `PlaylistEntry` / `PlaylistInfo` types + a pure `playlist_from_jsonl` parser (with 2 unit tests) for `yt-dlp --flat-playlist --dump-json` — fast even for huge lists since it skips per-video format probing.
+- `extract_playlist()` method with `--playlist-end` for the soft cap, and an `extract_playlist_info` command.
+- `start_media_batch` command — enqueues all selected entries as normal `Media` downloads sharing a quality-preset selector; with index-prefix on, names files `NN - Title.mp4` to **keep order on disk**. Everything flows through the existing pipeline (audio merge → mp4 → `--print-to-file` naming → auto-categorize to `Videos/`).
+
+**Frontend** ([index.html](index.html), [styles.css](src/styles.css), [main.js](src/main.js))
+- `classifyMediaUrl()` routing: pure playlist/channel → checklist; `watch?v=…&list=…` → **single video by default** with a "Download the whole playlist instead" button; plain video → unchanged.
+- Checklist panel: playlist title + count, **Select all/none**, quality dropdown (**default 1080p**), **"Number files (keep order)"** toggle, scrollable entry rows (index · title · duration), and a live **"Download selected (N)"** button.
+- Soft cap (200) with a **"Showing the first N — Load all"** warning that re-fetches uncapped.
+- Panel resets after queuing; a toast confirms "Queued N downloads".
+
+**Verified:** 1080p preset selector produces a merged **mp4** with the **`01 - `** index prefix exactly as designed.
+
+## To try it (rebuild — quit from tray, then `npm run tauri dev`)
+1. Media → paste a **playlist URL** → checklist appears; pick quality, (optionally) Number files, select videos → **Download selected**.
+2. Paste a **video-in-playlist URL** → single video shows, with the "download the whole playlist instead" option.
+3. Items queue, download with audio as mp4, and land in `Videos/` (numbered if you chose that).
+
+## Commit message — add to body
+```
+- Add YouTube playlist/channel download: flat enumeration, checklist UI with quality presets, batch enqueue, optional index-prefix naming, soft cap
+```
+
+This was a big session — lots of uncommitted work. Want me to commit everything now in a few logical commits, or leave it for you?
+
+### 2026-06-07 18:35:00 — You
+IF video support 2k 4k, then it should be there, you have limited it to 1080P. I used this playlist the software is only showing one video only instead of 7. https://www.youtube.com/watch?v=UdIGvqIjEDM&list=PLn5zgkpUsh7jxUgyjE4uysOLTpMMFG9mS
+
+### 2026-06-07 18:35:36 — Claude
+Two things. Let me first diagnose the "only 1 video" issue by running yt-dlp on your exact URL — I need to see whether the `watch?v=…&list=…` form expands the playlist or not:
+
+### 2026-06-07 18:36:16 — Claude
+Found it — the `watch?v=…&list=…` form returns only **1** entry, and the `playlist?list=` form errored (0). yt-dlp isn't expanding the playlist. The fix is likely `--yes-playlist`. Let me confirm and see the errors:
+
+### 2026-06-07 18:36:45 — Claude
+Still only 1 even with `--yes-playlist`. Let me see the actual error on the `playlist?list=` form — I suspect the missing JS runtime (yt-dlp warned about that earlier) is blocking playlist enumeration:
+
+### 2026-06-07 18:37:34 — Claude
+The real cause surfaced: yt-dlp says **"The playlist does not exist"**, and notice there's **no `deno`** installed. yt-dlp warned earlier that *"YouTube extraction without a JS runtime has been deprecated"* — recent YouTube playlist enumeration needs a JS runtime (deno), and without it yt-dlp falls back to just the single video. Let me install deno and retry, while I add the 2K/4K presets in parallel:
+
+### 2026-06-07 18:37:56 — Claude
+Now the quality presets — add **2K (1440p)** and **4K (2160p)**. First the dropdown options:
+
+### 2026-06-07 18:38:17 — Claude
+Deno install failed (exit 43). Let me check why and verify whether deno actually fixes the playlist:
+
+### 2026-06-07 18:39:11 — Claude
+Deno is **already installed** — just not on this shell's PATH yet. Let me locate it, put it on PATH, and retry the playlist with yt-dlp:
+
+### 2026-06-07 18:42:27 — Claude
+Still 1 with deno — so it's not the JS runtime. The `playlist?list=` form returned **"The playlist does not exist"**, which points to this playlist being **private/unlisted** (yt-dlp can't enumerate it without your YouTube login cookies). Let me confirm my code path works on a clearly-public list (a channel's videos), so I can isolate whether it's this specific playlist:
+
+### 2026-06-07 18:43:41 — Claude
+Two separate things here, and I've got answers for both.
+
+## 1. 2K/4K — added ✅
+You're right, capping at 1080p was wrong. The presets now go: **Best available · 4K (2160p) · 2K (1440p) · 1080p · 720p · Audio only**. Each is a *height cap* that picks the best stream up to that resolution and falls back gracefully, and **"Best available"** grabs the highest the video offers (4K, 8K, whatever exists). ([index.html](index.html), [main.js](src/main.js))
+
+## 2. "Only 1 video instead of 7" — this one isn't our bug
+
+I ran your exact URL through yt-dlp and traced it:
+- `watch?v=…&list=…` → returns **1** entry.
+- `playlist?list=PLn5…` → **error: "YouTube said: The playlist does not exist."**
+- A clearly-public list (a channel's videos) → returned **5** entries fine.
+
+So our playlist code works — the problem is **that specific playlist is private or unlisted**. yt-dlp can't enumerate a private/unlisted playlist without being logged in, so it reports "does not exist" and falls back to just the one public video in the URL. (I also ruled out the missing JS runtime — I got deno onto PATH and retried; still 1, so it's authentication, not the runtime.)
+
+**To download from your own private/unlisted playlists, the app needs your YouTube session.** That's the **cookie/login feature** we discussed earlier. The clean, policy-safe way (not the blocked `--cookies-from-browser` credential-harvesting path) is:
+
+- You export a **`cookies.txt`** from your browser (via a "Get cookies.txt" extension), and Downpour passes it to yt-dlp with `--cookies <file>`.
+- I'd add a **"YouTube cookies file"** field in Settings → External tools; the backend already accepts a cookies param, so it's a contained change (extract + playlist + download all honor it).
+
+That would unlock private/unlisted playlists, age-gated videos, and members content **you're entitled to** — without touching DRM.
+
+## Side note
+**deno is now installed** (yt-dlp's JS runtime). It wasn't the cause here, but yt-dlp had been warning that YouTube extraction without it is deprecated and "some formats may be missing" — so having it improves format availability and future-proofs extraction. It takes effect after a normal restart (PATH refresh).
+
+## Commit message — add to body
+```
+- Add 2K/4K (1440p/2160p) playlist quality presets
+```
+
+**Want me to build the cookies-file option now?** That's the actual unlock for your private playlists — small, contained, and I can verify it end-to-end against your list once you point it at an exported cookies.txt.
+
+### 2026-06-07 18:47:21 — You
+Not now
+
+### 2026-06-07 18:47:30 — Claude
+Sounds good — I'll hold off on the cookies feature.
+
+Quick status: the **2K/4K presets** are in (Best available · 4K · 2K · 1080p · 720p · Audio only), and the "1 video" turned out to be that playlist being private/unlisted, not a bug — public playlists/channels enumerate fine.
+
+Whenever you're ready, two open items remain on the table:
+- **Cookies-file option** (unlocks your private/unlisted playlists, age-gated, members content) — deferred per your call.
+- **Committing** — there's a sizable pile of uncommitted work now (download_dir, resume-on-startup, tray, open/delete, icons, filename/Content-Disposition handling, media merge + naming + categorization, playlist download, 2K/4K presets). Say the word and I'll commit it in a few logical commits with clear messages, or you can use the commit message I drafted.
+
+Anything else you'd like to tackle?
+
+### 2026-06-07 18:49:12 — You
+and best available video will also be downlaoded with it right?
+
+### 2026-06-07 18:49:33 — Claude
+Yes — **"Best available" downloads video *and* audio together.** The selector is `bestvideo+bestaudio/best`, which means: take the highest-resolution video stream **plus** the best audio stream and **merge them** (with ffmpeg) into one file. The `/best` at the end is a safety fallback to an already-combined stream if the merge path isn't available. And the backend forces `--merge-output-format mp4`, so you get a single playable **.mp4 with sound** — same merge pipeline as every other preset.
+
+So all six presets produce video-with-audio:
+- **Best available** → highest res the video offers + best audio, merged.
+- **4K / 2K / 1080p / 720p** → best stream up to that height + best audio, merged.
+- **Audio only** → just the audio track (e.g. for music).
+
+One small nuance worth knowing: the height-capped presets prefer **AAC (m4a)** audio for maximum player compatibility, while **"Best available"** takes the absolute best audio (which on high-res YouTube is often Opus). It still merges into mp4 and plays fine in modern players (VLC, browsers, Windows 11's media player) — just flagging it in case you ever hit an older player that's picky about codecs. If you'd prefer, I can make "Best available" also favor AAC for safety, but as-is it's correct: **you get the best video with its audio.**
+
+### 2026-06-07 18:56:11 — You
+I think this should only be visible if you detect channel url or playlist or user check the playlist or channel url.
+
+### 2026-06-07 18:57:54 — Claude
+That looks like a CSS bug, not a logic bug — my `.media__playlist { display: flex }` is likely overriding the `hidden` attribute, so the panel shows even when it should be hidden. Let me check how the project handles `[hidden]`:
+
+### 2026-06-07 18:58:08 — Claude
+No global `[hidden]` reset — each flex component needs its own `[hidden]` override, and I forgot them for the playlist panel. That's why it's always visible. Let me check the button class too, then fix all of them:
+
+### 2026-06-07 18:58:22 — Claude
+Found it: `.media__playlist` and `.playlist__warning` both set `display: flex`, which overrides the `hidden` attribute — but unlike every other component, I never added their `[hidden]` overrides. So the panel is permanently visible. Fixing both:
+
+### 2026-06-07 18:58:43 — Claude
+Fixed — and you'd diagnosed it correctly. The panel *was* meant to be playlist-only, but a CSS bug made it permanently visible: `.media__playlist` sets `display: flex`, which overrides the `hidden` attribute. The project has no global `[hidden]` reset — every other flex component (`.media__info`, `.media__status`, `.view`, etc.) has its own `.component[hidden] { display: none }` rule, and I'd forgotten to add them for the playlist panel and its warning. So it showed empty, headerless, on every URL and at startup.
+
+Added the two missing overrides:
+- `.media__playlist[hidden] { display: none }`
+- `.playlist__warning[hidden] { display: none }`
+
+Now the panel obeys its `hidden` attribute, so it only appears when `renderPlaylist` un-hides it — i.e., exactly when you intended:
+- a **playlist / channel URL** is detected (`/playlist`, `list=` without `v=`, `/channel`, `/@`, `/c/`, `/user/`), or
+- you click **"Download the whole playlist instead"** on a video-in-playlist URL.
+
+For a plain single video, you'll only see the normal format card — no playlist controls.
+
+This is CSS-only, so it **hot-reloads** — no Rust rebuild needed; just reload the Media view (or it'll refresh on save). The empty panel should be gone immediately.

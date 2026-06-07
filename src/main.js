@@ -886,6 +886,42 @@ const mediaFilename = document.querySelector("#media-filename");
 const mediaDownloadBtn = document.querySelector("#media-download");
 const mediaDownloads = document.querySelector("#media-downloads");
 const mediaExtractBtn = document.querySelector("#media-extract");
+const mediaAsPlaylistBtn = document.querySelector("#media-as-playlist");
+const playlistInfo = document.querySelector("#playlist-info");
+const playlistTitle = document.querySelector("#playlist-title");
+const playlistMeta = document.querySelector("#playlist-meta");
+const playlistWarning = document.querySelector("#playlist-warning");
+const playlistEntries = document.querySelector("#playlist-entries");
+const playlistQuality = document.querySelector("#playlist-quality");
+const playlistIndexPrefix = document.querySelector("#playlist-index-prefix");
+const playlistSelectAll = document.querySelector("#playlist-select-all");
+const playlistSelectNone = document.querySelector("#playlist-select-none");
+const playlistDownloadBtn = document.querySelector("#playlist-download");
+
+/* Soft cap on how many playlist entries we fetch up front. */
+const PLAYLIST_SOFT_CAP = 200;
+
+/* yt-dlp format selectors for the batch quality presets. Each caps the video
+   height (except "best"/"audio") and pairs with the best audio, falling back
+   gracefully so a video that lacks the exact height still downloads. */
+function heightCappedSelector(maxHeight) {
+  return (
+    `bestvideo[height<=${maxHeight}]+bestaudio[ext=m4a]/` +
+    `bestvideo[height<=${maxHeight}]+bestaudio/` +
+    `best[height<=${maxHeight}]/best`
+  );
+}
+const PLAYLIST_PRESETS = {
+  best: "bestvideo+bestaudio/best",
+  2160: heightCappedSelector(2160),
+  1440: heightCappedSelector(1440),
+  1080: heightCappedSelector(1080),
+  720: heightCappedSelector(720),
+  audio: "bestaudio[ext=m4a]/bestaudio",
+};
+
+/* The playlist URL currently shown, so "Load all" can re-fetch uncapped. */
+let mediaPlaylistUrl = "";
 
 /* The URL whose formats are currently displayed. */
 let mediaCurrentUrl = "";
@@ -997,25 +1033,171 @@ function populateMediaInfo(info) {
   mediaInfo.hidden = false;
 }
 
+/* Classify a media URL: a pure playlist/channel, a single video that also
+   belongs to a playlist, or a plain single video. */
+function classifyMediaUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "single";
+  }
+  const path = parsed.pathname;
+  const hasList = parsed.searchParams.has("list");
+  const hasVideo = parsed.searchParams.has("v") || /\/(watch|shorts)\//.test(path);
+  if (/\/(playlist)/.test(path) || /\/(channel|c|user)\//.test(path) || path.startsWith("/@")) {
+    return "playlist";
+  }
+  if (hasList && !hasVideo) return "playlist";
+  if (hasList && hasVideo) return "single-with-list";
+  return "single";
+}
+
 mediaForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const url = mediaUrl.value.trim();
   if (!url) return;
 
+  const kind = classifyMediaUrl(url);
+  if (kind === "playlist") {
+    await extractPlaylist(url, PLAYLIST_SOFT_CAP);
+    return;
+  }
+
   mediaExtractBtn.disabled = true;
   mediaInfo.hidden = true;
+  playlistInfo.hidden = true;
   setMediaStatus("Extracting media info…");
   try {
     const info = await invoke("extract_media_info", { url, cookies: null });
     mediaCurrentUrl = url;
     mediaCurrentTitle = info.title || "";
     populateMediaInfo(info);
+    // Offer a whole-playlist download when the video is part of a playlist.
+    mediaAsPlaylistBtn.hidden = kind !== "single-with-list";
     setMediaStatus("");
   } catch (err) {
     setMediaStatus(`Extraction failed: ${err}`, true);
     showToast(`Media extraction failed: ${err}`, "error");
   } finally {
     mediaExtractBtn.disabled = false;
+  }
+});
+
+/* "Download whole playlist instead" — re-extract the same URL as a playlist. */
+mediaAsPlaylistBtn.addEventListener("click", () => {
+  const url = mediaUrl.value.trim();
+  if (url) extractPlaylist(url, PLAYLIST_SOFT_CAP);
+});
+
+/* Fetch and render a playlist as a checklist. `limit` caps entries (null = all). */
+async function extractPlaylist(url, limit) {
+  mediaExtractBtn.disabled = true;
+  mediaInfo.hidden = true;
+  playlistInfo.hidden = true;
+  mediaAsPlaylistBtn.hidden = true;
+  setMediaStatus("Loading playlist…");
+  try {
+    const info = await invoke("extract_playlist_info", { url, cookies: null, limit });
+    mediaPlaylistUrl = url;
+    renderPlaylist(info, limit);
+    setMediaStatus("");
+  } catch (err) {
+    setMediaStatus(`Playlist load failed: ${err}`, true);
+    showToast(`Playlist load failed: ${err}`, "error");
+  } finally {
+    mediaExtractBtn.disabled = false;
+  }
+}
+
+/* Render the playlist checklist. Shows a "Load all" affordance when the list was
+   capped (we received exactly `requestedLimit` entries, so there may be more). */
+function renderPlaylist(info, requestedLimit) {
+  const entries = info.entries || [];
+  playlistTitle.textContent = info.title || "Playlist";
+  const bits = [];
+  if (info.uploader) bits.push(info.uploader);
+  bits.push(`${entries.length} video${entries.length === 1 ? "" : "s"}`);
+  playlistMeta.textContent = bits.join(" · ");
+
+  const capped = requestedLimit != null && entries.length >= requestedLimit;
+  playlistWarning.hidden = !capped;
+  if (capped) {
+    playlistWarning.innerHTML = `Showing the first ${entries.length}. <button class="btn-ghost btn-ghost--sm" type="button" id="playlist-load-all">Load all</button>`;
+    playlistWarning
+      .querySelector("#playlist-load-all")
+      .addEventListener("click", () => extractPlaylist(mediaPlaylistUrl, null));
+  }
+
+  playlistEntries.innerHTML = "";
+  entries.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "playlist__entry";
+    li.dataset.url = entry.url;
+    li.dataset.title = entry.title || "";
+    li.dataset.index = entry.index;
+    li.innerHTML = `
+      <input type="checkbox" checked aria-label="Select" />
+      <span class="playlist__entry-index">${entry.index}</span>
+      <span class="playlist__entry-title" title="${escapeHtml(entry.title || "")}">${escapeHtml(entry.title || "Untitled")}</span>
+      <span class="playlist__entry-duration">${entry.duration != null ? humanDuration(entry.duration) : ""}</span>
+    `;
+    playlistEntries.appendChild(li);
+  });
+
+  updatePlaylistCount();
+  playlistInfo.hidden = false;
+}
+
+/* Update the count whenever any entry checkbox toggles (registered once). */
+playlistEntries.addEventListener("change", updatePlaylistCount);
+
+/* Update the "Download selected (N)" button label + disabled state. */
+function updatePlaylistCount() {
+  const n = playlistEntries.querySelectorAll('input[type="checkbox"]:checked').length;
+  playlistDownloadBtn.textContent = `Download selected (${n})`;
+  playlistDownloadBtn.disabled = n === 0;
+}
+
+playlistSelectAll.addEventListener("click", () => {
+  playlistEntries.querySelectorAll('input[type="checkbox"]').forEach((c) => (c.checked = true));
+  updatePlaylistCount();
+});
+playlistSelectNone.addEventListener("click", () => {
+  playlistEntries.querySelectorAll('input[type="checkbox"]').forEach((c) => (c.checked = false));
+  updatePlaylistCount();
+});
+
+playlistDownloadBtn.addEventListener("click", async () => {
+  const entries = [...playlistEntries.querySelectorAll(".playlist__entry")]
+    .filter((li) => li.querySelector('input[type="checkbox"]').checked)
+    .map((li) => ({
+      url: li.dataset.url,
+      title: li.dataset.title,
+      index: Number(li.dataset.index) || 0,
+    }));
+  if (!entries.length) return;
+
+  const formatSelectorValue = PLAYLIST_PRESETS[playlistQuality.value] || PLAYLIST_PRESETS["1080"];
+  const indexPrefix = playlistIndexPrefix.checked;
+
+  playlistDownloadBtn.disabled = true;
+  try {
+    const items = await invoke("start_media_batch", {
+      entries,
+      formatSelector: formatSelectorValue,
+      indexPrefix,
+    });
+    (items || []).forEach((item) => {
+      renderMediaRow(item);
+      upsertItem(item);
+    });
+    showToast(`Queued ${items?.length ?? entries.length} downloads`, "success");
+    resetMediaForm();
+  } catch (err) {
+    showToast(`Playlist download failed: ${err}`, "error");
+  } finally {
+    playlistDownloadBtn.disabled = false;
   }
 });
 
@@ -1049,15 +1231,19 @@ mediaDownloadBtn.addEventListener("click", async () => {
   }
 });
 
-/* Clear the media extraction panel + inputs after a download is started. */
+/* Clear the media extraction + playlist panels after a download is started. */
 function resetMediaForm() {
   mediaInfo.hidden = true;
+  mediaAsPlaylistBtn.hidden = true;
+  playlistInfo.hidden = true;
+  playlistEntries.innerHTML = "";
   mediaUrl.value = "";
   mediaFilename.value = "";
   mediaFormatSelect.innerHTML = "";
   mediaCurrentUrl = "";
   mediaCurrentFormats = [];
   mediaCurrentTitle = "";
+  mediaPlaylistUrl = "";
   setMediaStatus("");
 }
 

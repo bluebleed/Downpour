@@ -20,7 +20,7 @@ use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Mutex;
 
 use categorizer::Categorizer;
-use media_extractor::{MediaExtractor, MediaInfo};
+use media_extractor::{MediaExtractor, MediaInfo, PlaylistInfo};
 use models::{CancelTokens, DownloadItem, DownloadStatus, DownloadType, Downloads, QueueConfig};
 use persistence::PersistenceLayer;
 use queue::QueueManager;
@@ -414,6 +414,69 @@ async fn start_media_download(
     Ok(item)
 }
 
+/// Enumerate a playlist/channel (flat — no per-video formats, so it's fast).
+/// `limit` caps how many entries are returned for the UI soft-cap.
+#[tauri::command]
+async fn extract_playlist_info(
+    media: tauri::State<'_, MediaState>,
+    url: String,
+    cookies: Option<String>,
+    limit: Option<usize>,
+) -> Result<PlaylistInfo, String> {
+    let extractor = media.lock().await.clone();
+    extractor
+        .extract_playlist(&url, cookies.as_deref(), limit)
+        .await
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// One selected playlist entry to enqueue as a media download.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchEntry {
+    url: String,
+    title: String,
+    index: u32,
+}
+
+/// Enqueue many playlist entries at once. Each becomes a `Media` download with
+/// the shared `format_selector` (a yt-dlp format expression, e.g. a quality
+/// preset). When `index_prefix` is set the file is named `NN - <title>` so the
+/// playlist order is preserved on disk. Returns the enqueued items.
+#[tauri::command]
+async fn start_media_batch(
+    queue: tauri::State<'_, QueueManager>,
+    entries: Vec<BatchEntry>,
+    format_selector: String,
+    index_prefix: bool,
+) -> Result<Vec<DownloadItem>, String> {
+    let mut started = Vec::new();
+    for entry in entries {
+        let id = uuid::Uuid::new_v4().to_string();
+        let template = if index_prefix {
+            format!("{:02} - %(title)s.%(ext)s", entry.index)
+        } else {
+            "%(title)s.%(ext)s".to_string()
+        };
+        let display = if entry.title.trim().is_empty() {
+            "Media download".to_string()
+        } else {
+            entry.title.clone()
+        };
+
+        let mut item = DownloadItem::new(id, entry.url, display);
+        item.download_type = DownloadType::Media;
+        item.media_format_id = Some(format_selector.clone());
+        item.output_template = Some(template);
+        item.total_size = 100;
+
+        if queue.enqueue(item.clone()).await.is_ok() {
+            started.push(item);
+        }
+    }
+    Ok(started)
+}
+
 /// Cancel an in-flight (or queued) media download and discard its partial file
 /// (Req 8.4, 8.8). Routes through the queue so the concurrency permit is freed
 /// and the next queued download can start.
@@ -750,6 +813,8 @@ pub fn run() {
             set_max_concurrent,
             extract_media_info,
             start_media_download,
+            extract_playlist_info,
+            start_media_batch,
             cancel_media_download,
         ])
         .run(tauri::generate_context!())

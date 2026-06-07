@@ -34,6 +34,9 @@ use tokio_util::sync::CancellationToken;
 /// Timeout applied to the `--dump-json` info-extraction process (Requirement 8.1).
 const INFO_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Timeout for enumerating a playlist/channel (flat, so fast even when large).
+const PLAYLIST_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Maximum progress events emitted per second per media download (Requirement 8.3).
 const MAX_PROGRESS_EVENTS_PER_SEC: u64 = 3;
 
@@ -133,6 +136,28 @@ pub struct MediaFormat {
     pub filesize: Option<u64>,
     pub has_video: bool,
     pub has_audio: bool,
+}
+
+/// A single entry in a playlist/channel, from a flat (no per-video formats)
+/// enumeration. The `url` is the canonical per-video URL yt-dlp can re-fetch.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistEntry {
+    pub url: String,
+    pub title: String,
+    /// Duration in whole seconds, when known.
+    pub duration: Option<u64>,
+    /// 1-based position in the playlist.
+    pub index: u32,
+}
+
+/// A playlist/channel and its entries, from a flat enumeration.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistInfo {
+    pub title: String,
+    pub uploader: String,
+    pub entries: Vec<PlaylistEntry>,
 }
 
 /// A throttled progress update parsed from yt-dlp stdout.
@@ -420,6 +445,87 @@ fn media_info_from_json(json: &str) -> Result<MediaInfo> {
     })
 }
 
+/// Parse the JSON-Lines output of `yt-dlp --flat-playlist --dump-json` into a
+/// [`PlaylistInfo`]. Each non-empty line is one entry; playlist-level title and
+/// uploader are read from the entries (yt-dlp repeats them on each line).
+/// Lines that don't parse or lack a usable URL are skipped.
+pub fn playlist_from_jsonl(stdout: &str) -> PlaylistInfo {
+    let mut entries = Vec::new();
+    let mut title = String::new();
+    let mut uploader = String::new();
+
+    for (i, line) in stdout.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        if title.is_empty() {
+            if let Some(t) = v
+                .get("playlist_title")
+                .or_else(|| v.get("playlist"))
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                title = t.to_string();
+            }
+        }
+        if uploader.is_empty() {
+            if let Some(u) = v
+                .get("playlist_uploader")
+                .or_else(|| v.get("uploader"))
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                uploader = u.to_string();
+            }
+        }
+
+        let url = match v
+            .get("url")
+            .or_else(|| v.get("webpage_url"))
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(u) => u.to_string(),
+            None => continue,
+        };
+        let entry_title = v
+            .get("title")
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Untitled")
+            .to_string();
+        let duration = v
+            .get("duration")
+            .and_then(|x| x.as_f64())
+            .filter(|d| d.is_finite() && *d >= 0.0)
+            .map(|d| d as u64);
+        let index = v
+            .get("playlist_index")
+            .and_then(|x| x.as_u64())
+            .map(|x| x as u32)
+            .unwrap_or((i + 1) as u32);
+
+        entries.push(PlaylistEntry {
+            url,
+            title: entry_title,
+            duration,
+            index,
+        });
+    }
+
+    PlaylistInfo {
+        title,
+        uploader,
+        entries,
+    }
+}
+
 // ─── MediaExtractor ──────────────────────────────────────────────────────────
 
 /// Orchestrates yt-dlp and ffmpeg for permitted media downloads.
@@ -569,6 +675,68 @@ impl MediaExtractor {
         }
 
         media_info_from_json(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    /// Enumerate a playlist/channel without fetching per-video formats (fast even
+    /// for large lists). When `limit` is set, only the first `limit` entries are
+    /// returned (`--playlist-end`), which the UI uses for the soft cap.
+    pub async fn extract_playlist(
+        &self,
+        url: &str,
+        cookies: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<PlaylistInfo> {
+        let status = self.check_availability().await;
+        if !status.ytdlp_available {
+            return Err(anyhow!(ExtractorStatus {
+                ytdlp_available: false,
+                ffmpeg_available: status.ffmpeg_available,
+            }
+            .missing_binary_error()
+            .unwrap_or_else(|| "yt-dlp is unavailable".to_string())));
+        }
+
+        let mut args: Vec<String> = vec![
+            "--flat-playlist".into(),
+            "--dump-json".into(),
+            "--no-warnings".into(),
+            "--no-progress".into(),
+        ];
+        if let Some(n) = limit {
+            args.push("--playlist-end".into());
+            args.push(n.to_string());
+        }
+        Self::push_cookie_header(&mut args, cookies);
+        args.push(url.to_string());
+        Self::validate_args(&args)?;
+
+        let child = self.spawn(&args)?;
+        let output = match tokio::time::timeout(PLAYLIST_TIMEOUT, child.wait_with_output()).await {
+            Ok(out) => out.context("failed to run yt-dlp for playlist extraction")?,
+            Err(_) => {
+                return Err(anyhow!(
+                    "yt-dlp playlist extraction timed out after {}s",
+                    PLAYLIST_TIMEOUT.as_secs()
+                ));
+            }
+        };
+
+        if !output.status.success() {
+            let tail = last_lines(&String::from_utf8_lossy(&output.stderr), STDERR_TAIL_LINES);
+            return Err(anyhow!(
+                "yt-dlp playlist extraction failed ({}): {}",
+                output.status,
+                tail
+            ));
+        }
+
+        let info = playlist_from_jsonl(&String::from_utf8_lossy(&output.stdout));
+        if info.entries.is_empty() {
+            return Err(anyhow!(
+                "no playlist entries found (is this a playlist URL?)"
+            ));
+        }
+        Ok(info)
     }
 
     /// Download the selected format to `output_path`, forwarding throttled
@@ -1078,6 +1246,42 @@ mod tests {
         let video = &info.formats[1];
         assert!(video.has_video && !video.has_audio);
         assert_eq!(video.quality, "1080p");
+    }
+
+    #[test]
+    fn parses_flat_playlist_jsonl() {
+        // Two entries as emitted by `yt-dlp --flat-playlist --dump-json`.
+        let jsonl = concat!(
+            r#"{"url":"https://www.youtube.com/watch?v=AAA","title":"First","duration":3674.0,"playlist_index":1,"playlist_title":"My List","playlist_uploader":"Chan"}"#,
+            "\n",
+            r#"{"url":"https://www.youtube.com/watch?v=BBB","title":"Second","duration":22258.0,"playlist_index":2,"playlist_title":"My List"}"#,
+            "\n",
+        );
+        let info = playlist_from_jsonl(jsonl);
+        assert_eq!(info.title, "My List");
+        assert_eq!(info.uploader, "Chan");
+        assert_eq!(info.entries.len(), 2);
+        assert_eq!(info.entries[0].url, "https://www.youtube.com/watch?v=AAA");
+        assert_eq!(info.entries[0].title, "First");
+        assert_eq!(info.entries[0].duration, Some(3674));
+        assert_eq!(info.entries[0].index, 1);
+        assert_eq!(info.entries[1].index, 2);
+    }
+
+    #[test]
+    fn flat_playlist_skips_unparseable_and_urlless_lines() {
+        let jsonl = concat!(
+            "not json\n",
+            r#"{"title":"no url here"}"#,
+            "\n",
+            r#"{"url":"https://x/y","title":"ok"}"#,
+            "\n",
+        );
+        let info = playlist_from_jsonl(jsonl);
+        assert_eq!(info.entries.len(), 1);
+        assert_eq!(info.entries[0].title, "ok");
+        // Falls back to line-order index when playlist_index is absent.
+        assert_eq!(info.entries[0].index, 3);
     }
 
     #[test]

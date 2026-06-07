@@ -159,7 +159,37 @@
                 autocomplete="off"
               />
               <button class="btn-primary" type="button" id="media-download">Download</button>
+              <button class="btn-ghost btn-ghost--sm" type="button" id="media-as-playlist" hidden>
+                This video is part of a playlist — download the whole playlist instead
+              </button>
             </div>
+          </div>
+
+          <!-- Playlist checklist panel -->
+          <div class="media__playlist glass-panel" id="playlist-info" hidden>
+            <div class="media__info-text">
+              <h2 class="media__title" id="playlist-title"></h2>
+              <p class="media__meta" id="playlist-meta"></p>
+            </div>
+            <div class="playlist__warning" id="playlist-warning" hidden></div>
+            <div class="playlist__controls">
+              <button class="btn-ghost btn-ghost--sm" type="button" id="playlist-select-all">Select all</button>
+              <button class="btn-ghost btn-ghost--sm" type="button" id="playlist-select-none">Select none</button>
+              <select class="input select playlist__quality" id="playlist-quality" aria-label="Quality">
+                <option value="best">Best available</option>
+                <option value="2160">4K (2160p)</option>
+                <option value="1440">2K (1440p)</option>
+                <option value="1080" selected>1080p</option>
+                <option value="720">720p</option>
+                <option value="audio">Audio only</option>
+              </select>
+              <label class="field__check playlist__prefix">
+                <input id="playlist-index-prefix" type="checkbox" />
+                <span>Number files (keep order)</span>
+              </label>
+            </div>
+            <ul class="playlist__entries" id="playlist-entries"></ul>
+            <button class="btn-primary" type="button" id="playlist-download">Download selected</button>
           </div>
 
           <ul class="downloads view-comfortable media__downloads" id="media-downloads">
