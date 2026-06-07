@@ -129,6 +129,13 @@ pub struct DownloadItem {
     /// in its folder. `None` until the download completes.
     #[serde(default)]
     pub output_path: Option<PathBuf>,
+    /// For `Media` downloads, the yt-dlp output template (e.g.
+    /// `%(title)s.%(ext)s`) used for the `-o` argument. Kept separate from
+    /// `filename` so the card can show the real video title while downloading,
+    /// while yt-dlp still names the file from the template. `None` for HTTP
+    /// downloads, which name the file directly from `filename`.
+    #[serde(default)]
+    pub output_template: Option<String>,
 }
 
 impl DownloadItem {
@@ -161,6 +168,7 @@ impl DownloadItem {
             segment_count: 4,
             media_format_id: None,
             output_path: None,
+            output_template: None,
         }
     }
 }

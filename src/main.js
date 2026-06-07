@@ -736,10 +736,15 @@ function queueActionsHtml(status) {
     .join("");
 }
 
-/* Build the queue list from a fresh snapshot of ordered DownloadItems. */
+/* Build the queue list from a fresh snapshot of ordered DownloadItems. The Queue
+   view is the live work-list, so finished/errored items are excluded — they
+   remain in the Downloads view as history. */
 function renderQueue(orderedItems) {
   queueList.innerHTML = "";
-  if (!orderedItems.length) {
+  const pending = (orderedItems || []).filter(
+    (item) => item.status !== "complete" && item.status !== "error",
+  );
+  if (!pending.length) {
     const li = document.createElement("li");
     li.className = "empty";
     li.textContent = "Queue is empty.";
@@ -747,7 +752,7 @@ function renderQueue(orderedItems) {
     return;
   }
 
-  orderedItems.forEach((item, index) => {
+  pending.forEach((item, index) => {
     const status = item.status || "queued";
     const li = document.createElement("li");
     li.className = "queue-item";
@@ -887,6 +892,8 @@ let mediaCurrentUrl = "";
 /* The format list currently displayed, so the download handler can look up the
    selected format's video/audio capabilities. */
 let mediaCurrentFormats = [];
+/* The extracted title, used as the card's display name while downloading. */
+let mediaCurrentTitle = "";
 /* id -> <li> for media download cards in the media view. */
 const mediaRows = new Map();
 
@@ -1001,6 +1008,7 @@ mediaForm.addEventListener("submit", async (e) => {
   try {
     const info = await invoke("extract_media_info", { url, cookies: null });
     mediaCurrentUrl = url;
+    mediaCurrentTitle = info.title || "";
     populateMediaInfo(info);
     setMediaStatus("");
   } catch (err) {
@@ -1026,16 +1034,32 @@ mediaDownloadBtn.addEventListener("click", async () => {
   try {
     const args = { url: mediaCurrentUrl, formatId: formatSelectorValue };
     if (filename) args.filename = filename;
+    if (mediaCurrentTitle) args.title = mediaCurrentTitle;
     const item = await invoke("start_media_download", args);
     renderMediaRow(item);
     upsertItem(item);
     showToast(`Started media download: ${item.filename || mediaCurrentUrl}`, "success");
+    // The extraction form has done its job — reset it so the screen is clean and
+    // ready for the next URL (the started download appears in the list below).
+    resetMediaForm();
   } catch (err) {
     showToast(`Media download failed: ${err}`, "error");
   } finally {
     mediaDownloadBtn.disabled = false;
   }
 });
+
+/* Clear the media extraction panel + inputs after a download is started. */
+function resetMediaForm() {
+  mediaInfo.hidden = true;
+  mediaUrl.value = "";
+  mediaFilename.value = "";
+  mediaFormatSelect.innerHTML = "";
+  mediaCurrentUrl = "";
+  mediaCurrentFormats = [];
+  mediaCurrentTitle = "";
+  setMediaStatus("");
+}
 
 /* Render a media download card into the media view's own list. */
 function renderMediaRow(item) {

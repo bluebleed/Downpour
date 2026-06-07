@@ -1108,3 +1108,182 @@ feat: download dir wiring, resume-on-startup, tray, media merge, file actions
 - Replace emoji icons with themed monochrome SVGs
 - Docs: ARCHITECTURE.md, GEMINI.md, working-memory updates
 ```
+
+### 2026-06-07 14:03:08 — You
+i was able to download the youtube video, when trying to open the file from our software it says : Action failed: file not found: C:\Users\Yash Verma\Downloads\CJP Protest CJP .mp4 . The file got saved with a name CJP Protest： महिलाओं के नेतृत्व और चुनाव लड़ने पर क्या बोले CJP प्रवक्ता？
+
+### 2026-06-07 14:04:43 — Claude
+The on-disk name is the full Unicode title (`CJP Protest： महिलाओं…？.mp4`) but the app shows an ASCII-stripped `CJP Protest CJP .mp4` — that's the signature of `sanitize_filename` running on the captured name. And the size still shows `100 B`, meaning my file-stat fix isn't active. Let me check the current code to find where the media filename gets mangled.
+
+### 2026-06-07 14:06:04 — Claude
+`sanitize_filename` actually preserves Unicode — so it's *not* the culprit. The real issue is subtler: **yt-dlp's piped stdout on Windows isn't UTF-8, so the Devanagari in the `[Merger]` line got mangled when my parser read it** — the file on disk is correct, but the name I captured isn't. The robust fix is to have yt-dlp write the exact final path to a *file* (UTF-8, encoding-safe) instead of parsing stdout. Let me verify that mechanism works:
+
+### 2026-06-07 14:10:01 — Claude
+`--print-to-file after_move:filepath` writes the **exact** final path to a file (UTF-8, no stdout-encoding problem). That's the bulletproof fix. Let me implement it. First, update `build_download_args` to write the final path to a temp file:
+
+### 2026-06-07 14:10:20 — Claude
+Now update `download()` to create the temp file, pass it, and read the authoritative path from it:
+
+### 2026-06-07 14:10:43 — Claude
+That uniqueness expression is sloppy. Let me fix it to use a proper timestamp:
+
+### 2026-06-07 14:10:56 — Claude
+Now read the final path from that file on success (preferring it over stdout parsing), and clean it up on all exit paths:
+
+### 2026-06-07 14:11:56 — Claude
+Now update the two test call sites of `build_download_args` for the new parameter:
+
+### 2026-06-07 14:12:16 — Claude
+Now compile, lint, and test:
+
+### 2026-06-07 14:13:10 — Claude
+All green — **193 tests pass**, clippy clean.
+
+## Root cause
+The file on disk was always correct. The bug: when yt-dlp prints the `[Merger] … <path>` line to a **pipe on Windows**, non-ASCII titles (your Hindi text) get mangled by the console encoding, so the name my parser captured (`CJP Protest CJP .mp4`) didn't match the real file. That wrong name then:
+- showed on the card,
+- made **Open** look for a non-existent path → "file not found",
+- made the size **stat fail** → stuck at the `100 B` placeholder.
+
+## The fix (verified by running yt-dlp directly)
+Instead of parsing stdout, the app now tells yt-dlp to **write the exact final path to a file** (`--print-to-file after_move:filepath`). yt-dlp writes that file as UTF-8, so it's encoding-safe and captures the full Unicode name precisely. The app reads it back and uses it for the card name, the size stat, and Open/Folder/Delete. The temp file is unique-per-download and cleaned up on every exit path (success/error/cancel). Stdout parsing remains as a fallback.
+
+So after rebuild: the card shows the real `CJP Protest： महिलाओं…？.mp4`, the real size (~134 MB), and ↗/📂 resolve to the actual file.
+
+## 🔑 Same rebuild requirement
+This is a Rust change, so it only takes effect on a fresh build:
+1. **Quit Downpour from the tray** (right-click → Quit), not just the window — otherwise it keeps `downpour.exe` locked and the rebuild silently no-ops (this is why your media fixes haven't been landing).
+2. `npm run tauri dev`
+
+Then re-download that video and the name/size/Open should all be correct.
+
+## Commit message addition
+If you commit now, add this line to the body of the message I gave you:
+```
+- Capture media filename via yt-dlp --print-to-file (Unicode-safe) + real file size
+```
+
+### 2026-06-07 14:37:07 — You
+During download the name is absurd, after download everything is working great now. but still showing in queue. During downloading the file, the name can be extarcted from as can be seen in screenshot? Discuss no code.
+
+### 2026-06-07 14:37:52 — Claude
+Great — so post-download it's all correct now (real title, 135.9 MB, Open/Folder/Delete working). Two things left, and yes, both are very fixable. Discussion only:
+
+## 1. The absurd `%(title)s.%(ext)s` name *during* download
+
+You're exactly right — we already have the real title in hand. `extract_media_info` returns it and you can see it rendered in the Media info panel ("CJP Protest: हिंदू-मुस्लिम…") *before* you even click Download. So there's no need to wait for completion to show a sensible name.
+
+Why it shows the template today: the item's `filename` field currently does **double duty** — it's both the *display name* on the card **and** the literal `-o` output template handed to yt-dlp. Since yt-dlp needs `%(title)s.%(ext)s` to name the file correctly, that ugly template leaks onto the card until completion.
+
+The fix is to **decouple display name from the yt-dlp template**:
+- At enqueue, set the card's display name to the title we already have (plus the selected format's extension, e.g. `CJP Protest… .webm`), purely for display.
+- Keep feeding yt-dlp the `%(title)s.%(ext)s` template for actual file naming.
+- On completion, replace the display name with the authoritative path from `--print-to-file` (which we already do).
+
+Caveat to be aware of: the *during-download* name would be our best guess — yt-dlp sanitizes Windows-illegal characters (`:` → `：`) and may change the extension after merge (webm vs mp4). So the mid-download name could differ slightly from the final one, but it'll be a real, readable title instead of the template, and the completion step snaps it to the exact name. That's a good trade.
+
+## 2. Completed items still showing in the Queue view
+
+The **Queue** tab is meant to be the *scheduling order* for pending/active work — it currently renders **every** item, including completed ones, because `get_queue_state` returns the whole list. A finished download has nothing left to schedule or reorder, so it's just clutter there.
+
+Two ways to handle it:
+- **Filter the Queue view** to show only non-terminal statuses (queued / downloading / paused) — completed & errored items simply don't appear in Queue. They still live in the **Downloads** tab, which is your full list/history. *(Cleanest, minimal — Queue becomes purely "what's left to do".)*
+- **Remove from the scheduling order on completion** in the backend — same visible effect, but also shrinks the persisted order list.
+
+I'd recommend the **filter approach** (Downloads already serves as the history/archive, so Queue should just be the live work list). It's a small frontend-only change.
+
+Want me to do both? My plan would be: (1) decouple the media display name so the title shows during download, and (2) filter completed/errored items out of the Queue view. Say the word and I'll implement + verify.
+
+### 2026-06-07 14:40:32 — You
+Yes, and since when the media starts downloading, the details fetched to download the screen still shows , it should automatically be removed? what you think?
+
+### 2026-06-07 14:41:43 — Claude
+Agreed on all three — and yes, point 3 is the right call. After you hit Download, the extraction panel (thumbnail/format/Download button) has served its purpose; leaving it there is stale and confusing, especially since the started download already appears in the list below. It should reset so you can paste the next URL — exactly like the Add-Download modal closing on submit. Standard "the action consumed this form" UX.
+
+So I'll implement all three:
+1. **Real title during download** — decouple the display name from yt-dlp's `-o` template, using the title we already fetched.
+2. **Filter completed/errored out of the Queue view** — Queue becomes the live work-list; history stays in Downloads.
+3. **Reset the media extraction panel after starting** a download.
+
+Let me look at the pieces. First the model + media command + queue:
+
+### 2026-06-07 14:42:05 — Claude
+Now update `start_media_download` to set a display title + the template, and read the current command:
+
+### 2026-06-07 14:42:34 — Claude
+Now the queue must use `output_template` (not the display `filename`) for yt-dlp's `-o`:
+
+### 2026-06-07 14:42:50 — Claude
+Now the persistence test literals need the new field. Let me add them:
+
+### 2026-06-07 14:43:13 — Claude
+Now the frontend. Pass the title, reset the panel after start, and filter the Queue view. Let me capture the title and update the media handler:
+
+### 2026-06-07 14:43:54 — Claude
+Now filter completed/errored items out of the Queue view. Let me read `renderQueue`:
+
+### 2026-06-07 14:44:19 — Claude
+Now compile, lint, and test the backend:
+
+### 2026-06-07 14:45:41 — Claude
+All green — 193 tests pass, clippy clean. All three are done.
+
+## What changed
+
+**1. Real title during download** — The media item now carries two separate fields: a **display name** (the title you already see in the extraction panel, passed through to the card) and the **yt-dlp `-o` template** (`%(title)s.%(ext)s`). So the card shows "CJP Protest: हिंदू-मुस्लिम…" the moment it starts, instead of the raw template, and the completion step still snaps it to the exact on-disk name. A user-typed filename still overrides both. (model field `output_template` + [lib.rs](src-tauri/src/lib.rs) + [queue.rs](src-tauri/src/queue.rs))
+
+**2. Queue view filtered** — `renderQueue` now shows only live work (queued / downloading / paused / merging). Completed and errored items drop out of Queue; they stay in **Downloads** as history. ([main.js](src/main.js))
+
+**3. Extraction panel resets after Download** — On a successful start, `resetMediaForm()` hides the info card and clears the URL/filename/format so the screen is clean and ready for the next link. The started download is already visible in the list below. ([main.js](src/main.js))
+
+## Test (rebuild — quit from tray, then `npm run tauri dev`)
+1. Media → extract → **Download**: the card immediately shows the **real title** (not `%(title)s.%(ext)s`), counts up, and on completion shows the exact filename + size.
+2. The extraction panel **clears** right after you hit Download.
+3. **Queue** tab no longer lists the finished item — only active/pending ones.
+
+## Commit message — add these lines to the body
+```
+- Show real video title on media cards during download (decouple display name from yt-dlp -o template)
+- Reset media extraction panel after starting a download
+- Show only active/pending items in the Queue view
+```
+
+### 2026-06-07 14:50:54 — You
+The prblem is that the videos are not getting saved in videos ( Category ) folder
+
+### 2026-06-07 14:51:28 — Claude
+Right — the auto-categorizer **deliberately skips media downloads**, so YouTube videos never get moved into `Videos/`. That skip made sense before (the final filename was unknown), but now that we capture the exact output path, we can categorize media too. Let me look at the categorizer wiring and the default category rules.
+
+### 2026-06-07 14:51:35 — Claude
+Let me check the default Videos category extensions (to confirm mp4/webm/mkv are covered):
+
+### 2026-06-07 14:51:52 — Claude
+Confirmed — `Videos` includes `.mp4`, `.webm`, `.mkv`, `.m4v`, so a media file will sort correctly. Now I'll remove the media skip and use the captured `output_path` as the source:
+
+### 2026-06-07 14:52:29 — Claude
+`DownloadType` is still used in `start_media_download`, so no unused import. Let me compile and test:
+
+### 2026-06-07 14:54:04 — Claude
+All green — 193 tests pass, clippy clean.
+
+## The cause
+The auto-categorizer was hard-coded to **skip media downloads** (`download_type == Media`). That was a deliberate guard from back when a media file's final name/path was unknown — so YouTube videos always stayed in the download root and never moved into `Videos/`.
+
+## The fix ([lib.rs](src-tauri/src/lib.rs))
+Now that media reports its real `output_path` on completion (via the `--print-to-file` work), I:
+- **Removed the media skip** — both HTTP and media completions go through the categorizer.
+- **Used `output_path` as the source file** (the exact path yt-dlp wrote), falling back to `download_dir/filename`.
+
+So a finished `…title.mp4` / `.webm` gets categorized by extension and moved into `Downloads\Videos\` (the default `Videos` rule already covers `.mp4 .mkv .webm .m4v` etc.), the card's category badge shows **Videos**, and Open/Folder then point at the categorized location.
+
+## Test (rebuild — quit from tray, then `npm run tauri dev`)
+1. Download a YouTube video → on completion it should move into `Downloads\Videos\<title>.mp4`, with a **Videos** badge on the card.
+2. **📂 Open folder** should reveal it inside `Downloads\Videos\`.
+3. An audio-only download → `Music/`; a PDF → `Documents/`, etc.
+
+One thing to know: categorization runs **on completion** (the file is moved right after it finishes), and it only happens when "Auto-sort completed downloads into category folders" is enabled in Settings. If that toggle is off, files stay in the download root by design.
+
+## Commit message — add to body
+```
+- Auto-categorize media (yt-dlp) downloads into category folders using captured output path
+```

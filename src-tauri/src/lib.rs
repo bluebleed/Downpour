@@ -381,14 +381,29 @@ async fn start_media_download(
     url: String,
     format_id: String,
     filename: Option<String>,
+    title: Option<String>,
 ) -> Result<DownloadItem, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    // yt-dlp accepts an output template; default to title + extension.
-    let out_name = filename.unwrap_or_else(|| "%(title)s.%(ext)s".to_string());
 
-    let mut item = DownloadItem::new(id, url, out_name);
+    // The yt-dlp output template: a user-provided filename names the file exactly,
+    // otherwise yt-dlp names it from the video title + extension.
+    let template = filename
+        .clone()
+        .unwrap_or_else(|| "%(title)s.%(ext)s".to_string());
+
+    // The display name shown on the card *while downloading*: the user filename if
+    // given, else the real title we already fetched (so the card never shows the
+    // raw `%(title)s.%(ext)s` template). Replaced with the exact on-disk name on
+    // completion.
+    let display = filename
+        .or(title)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "Media download".to_string());
+
+    let mut item = DownloadItem::new(id, url, display);
     item.download_type = DownloadType::Media;
     item.media_format_id = Some(format_id);
+    item.output_template = Some(template);
     // Track progress as a percentage (0-100) since yt-dlp reports percent, not bytes.
     item.total_size = 100;
 
@@ -412,9 +427,10 @@ async fn cancel_media_download(
 
 // ─── Completion → auto-categorizer wiring ─────────────────────────────────────────
 
-/// Listen for download completions and route completed HTTP downloads through
-/// the auto-categorizer (Req 7.1). Media downloads use an output template, so
-/// their final path is not known here and they are skipped.
+/// Listen for download completions and route completed downloads through the
+/// auto-categorizer (Req 7.1). Both HTTP and media downloads are categorized:
+/// media now reports its real `output_path` on completion, so its file can be
+/// moved into the matching category folder (e.g. `Videos/`) just like HTTP.
 fn spawn_completion_categorizer(
     app: tauri::AppHandle,
     downloads: Downloads,
@@ -431,7 +447,7 @@ fn spawn_completion_categorizer(
             Err(_) => return,
         };
 
-        if item.status != DownloadStatus::Complete || item.download_type == DownloadType::Media {
+        if item.status != DownloadStatus::Complete {
             return;
         }
 
@@ -454,10 +470,12 @@ fn spawn_completion_categorizer(
             if !cat.is_enabled() {
                 return;
             }
-            // The engine saves files into the configured download directory, so
-            // resolve the source path against the same directory the categorizer
-            // uses for its category subfolders (kept in sync via update_settings).
-            let file_path = cat.download_dir().join(&item.filename);
+            // Use the real path the download wrote (set on completion for both
+            // HTTP and media), falling back to the configured dir + filename.
+            let file_path = item
+                .output_path
+                .clone()
+                .unwrap_or_else(|| cat.download_dir().join(&item.filename));
             let label = cat.categorize(&item.filename, None).map(str::to_string);
             let moved = cat.process(&app, &file_path, None).await;
             drop(cat);

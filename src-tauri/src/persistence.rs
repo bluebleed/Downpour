@@ -783,6 +783,7 @@ mod prop_round_trip_tests {
                 segment_count,
                 media_format_id,
                 output_path: None,
+                output_template: None,
             }
         }
     }
@@ -924,6 +925,7 @@ mod prop_round_trip_tests {
             segment_count: 4,
             media_format_id: None,
             output_path: Some("/downloads/Software/big.iso".into()),
+            output_template: None,
         };
 
         layer.save_download(&item).await.unwrap();

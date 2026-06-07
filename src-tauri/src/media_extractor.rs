@@ -476,6 +476,7 @@ impl MediaExtractor {
         url: &str,
         format_id: &str,
         output_path: &Path,
+        path_out_file: &Path,
         cookies: Option<&str>,
     ) -> Result<Vec<String>> {
         let mut args: Vec<String> = vec![
@@ -492,6 +493,12 @@ impl MediaExtractor {
             "mp4".into(),
             "--ffmpeg-location".into(),
             self.ffmpeg_path.to_string_lossy().into_owned(),
+            // Have yt-dlp write the final post-processed path to a file. This is
+            // the authoritative filename (Unicode-safe, unlike parsing stdout on
+            // Windows where the console encoding can mangle non-ASCII titles).
+            "--print-to-file".into(),
+            "after_move:filepath".into(),
+            path_out_file.to_string_lossy().into_owned(),
         ];
         Self::push_cookie_header(&mut args, cookies);
         args.push(url.to_string());
@@ -586,7 +593,20 @@ impl MediaExtractor {
             return Err(anyhow!(err));
         }
 
-        let args = self.build_download_args(url, format_id, output_path, None)?;
+        // A throwaway file yt-dlp writes the final output path into (see
+        // `build_download_args`). Unique per run so concurrent downloads don't
+        // clobber each other's result.
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path_out_file = std::env::temp_dir().join(format!(
+            "downpour-ytpath-{}-{}.txt",
+            std::process::id(),
+            unique
+        ));
+
+        let args = self.build_download_args(url, format_id, output_path, &path_out_file, None)?;
         let mut child = self.spawn(&args)?;
 
         let stdout = child
@@ -626,6 +646,7 @@ impl MediaExtractor {
                     terminate_child(&mut child).await;
                     stderr_task.abort();
                     cleanup_partial(output_path).await;
+                    let _ = tokio::fs::remove_file(&path_out_file).await;
                     return Err(anyhow!("media download cancelled"));
                 }
                 next = lines.next_line() => {
@@ -678,11 +699,22 @@ impl MediaExtractor {
                 q.iter().cloned().collect::<Vec<_>>().join("\n")
             };
             cleanup_partial(output_path).await;
+            let _ = tokio::fs::remove_file(&path_out_file).await;
             return Err(anyhow!("yt-dlp exited with {}: {}", exit, tail));
         }
 
-        // The merged/post-processed path wins over a per-stream destination.
-        Ok(final_output.or(destination).map(PathBuf::from))
+        // Prefer the path yt-dlp wrote to the print-to-file (authoritative and
+        // Unicode-safe); fall back to the stdout-parsed path if that file is
+        // missing or empty for some reason.
+        let from_file = tokio::fs::read_to_string(&path_out_file)
+            .await
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let _ = tokio::fs::remove_file(&path_out_file).await;
+
+        Ok(from_file.or_else(|| final_output.or(destination).map(PathBuf::from)))
     }
 
     /// Spawn yt-dlp with piped stdio. On Unix the child is placed in its own
@@ -982,6 +1014,7 @@ mod tests {
                 "https://example.com/v/1",
                 "137+140",
                 Path::new("/tmp/out.mp4"),
+                Path::new("/tmp/pathout.txt"),
                 Some("session=abc"),
             )
             .expect("download args build");
@@ -1115,7 +1148,13 @@ mod tests {
             );
 
             let download_args = ext
-                .build_download_args(&url, &format_id, Path::new("/tmp/out.mp4"), cookies_ref)
+                .build_download_args(
+                    &url,
+                    &format_id,
+                    Path::new("/tmp/out.mp4"),
+                    Path::new("/tmp/pathout.txt"),
+                    cookies_ref,
+                )
                 .expect("benign download config must build");
             prop_assert!(
                 !contains_forbidden_flag(&download_args),

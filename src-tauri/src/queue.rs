@@ -706,13 +706,16 @@ impl QueueManager {
             }
         };
 
-        // Pull the URL, output filename (template), and chosen format from the item.
-        let (url, filename, format_id) = {
+        // Pull the URL, yt-dlp output template, and chosen format from the item.
+        // The template (not the display filename) drives yt-dlp's `-o` naming.
+        let (url, template, format_id) = {
             let map = inner.downloads.lock().await;
             match map.get(id) {
                 Some(it) => (
                     it.url.clone(),
-                    it.filename.clone(),
+                    it.output_template
+                        .clone()
+                        .unwrap_or_else(|| it.filename.clone()),
                     it.media_format_id.clone(),
                 ),
                 None => return,
@@ -726,7 +729,7 @@ impl QueueManager {
                 return;
             }
         };
-        let output_path = self.download_dir().join(&filename);
+        let output_path = self.download_dir().join(&template);
 
         // Register a cancellation token so cancel/pause can stop this download.
         let cancel = CancellationToken::new();
