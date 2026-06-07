@@ -40,10 +40,21 @@ pub struct AppSettings {
     pub categories: Vec<CategoryRule>,
     /// Whether queued downloads start automatically.
     pub auto_start_queue: bool,
+    /// Whether interrupted downloads auto-resume on app launch. When `false`
+    /// (the default), restored downloads stay paused until the user clicks
+    /// "Resume All"; when `true`, the scheduler resumes them automatically after
+    /// `restore_from_disk`. Defaulted via serde so older settings files load.
+    #[serde(default)]
+    pub resume_on_startup: bool,
     /// Whether closing the window minimizes to system tray.
     pub minimize_to_tray: bool,
     /// Whether to show desktop notifications on completion/error.
     pub notifications_enabled: bool,
+    /// Whether to ask for confirmation before deleting a downloaded file from
+    /// disk. Defaults to `true`; serde-defaulted so older settings files load
+    /// with confirmation enabled.
+    #[serde(default = "default_true")]
+    pub confirm_on_delete: bool,
     /// Minimum file size (bytes) for browser capture to intercept.
     pub capture_min_size: u64,
     /// File extensions the browser extension will capture (empty = all).
@@ -52,6 +63,12 @@ pub struct AppSettings {
     pub ytdlp_path: Option<PathBuf>,
     /// Path to the ffmpeg binary.
     pub ffmpeg_path: Option<PathBuf>,
+}
+
+/// Serde default for boolean settings that should default to `true` when absent
+/// from an older settings file.
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -64,8 +81,10 @@ impl Default for AppSettings {
             auto_categorize: true,
             categories: Self::default_categories(),
             auto_start_queue: true,
+            resume_on_startup: false,
             minimize_to_tray: false,
             notifications_enabled: true,
+            confirm_on_delete: true,
             capture_min_size: 1_048_576, // 1 MB
             capture_extensions: Vec::new(),
             ytdlp_path: None,
@@ -296,6 +315,48 @@ mod tests {
     #[test]
     fn speed_limit_rejects_negative() {
         assert!(AppSettings::validate_speed_limit_signed(-1).is_err());
+    }
+
+    // ─── resume_on_startup: default off + forward-compatible deserialization ──────
+
+    #[test]
+    fn resume_on_startup_defaults_off() {
+        // Matches the spec: restored downloads stay paused until the user resumes.
+        assert!(!AppSettings::default().resume_on_startup);
+    }
+
+    #[test]
+    fn resume_on_startup_missing_field_deserializes_to_false() {
+        // An older settings file written before this field existed must still load,
+        // defaulting the new flag to false (preserving prior behavior).
+        let json = r#"{
+            "downloadDir": "/tmp/dl",
+            "maxConcurrent": 3,
+            "defaultSegments": 4,
+            "speedLimit": 0,
+            "autoCategorize": true,
+            "categories": [],
+            "autoStartQueue": true,
+            "minimizeToTray": false,
+            "notificationsEnabled": true,
+            "captureMinSize": 1048576,
+            "captureExtensions": [],
+            "ytdlpPath": null,
+            "ffmpegPath": null
+        }"#;
+        let parsed: AppSettings = serde_json::from_str(json).unwrap();
+        assert!(!parsed.resume_on_startup);
+    }
+
+    #[test]
+    fn resume_on_startup_round_trips_when_enabled() {
+        let settings = AppSettings {
+            resume_on_startup: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: AppSettings = serde_json::from_str(&json).unwrap();
+        assert!(back.resume_on_startup);
     }
 
     // ─── Unit tests: rejection retains the previous setting ───────────────────────

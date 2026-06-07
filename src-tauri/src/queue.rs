@@ -23,8 +23,9 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -33,7 +34,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-use crate::downloader::{self, downloads_dir};
+use crate::downloader;
 use crate::media_extractor::{MediaExtractor, MediaProgress};
 use crate::models::{
     CancelTokens, DownloadItem, DownloadStatus, DownloadType, Downloads, PausedState, QueueConfig,
@@ -106,6 +107,12 @@ struct QueueInner {
     max_concurrent: AtomicUsize,
     /// When set, the scheduler will not start any new downloads (pause_all).
     suspended: AtomicBool,
+    /// Live directory where downloaded files are saved. Seeded from
+    /// `AppSettings.download_dir`; updated by `set_download_dir` when settings
+    /// change so downloads honour the configured location without a restart
+    /// (Req 11.5). Reads clone the path and drop the guard immediately, so it is
+    /// never held across an `.await`.
+    download_dir: RwLock<PathBuf>,
     /// FIFO ordering of download ids; the source of truth for scheduling order.
     order: Mutex<Vec<String>>,
     /// Notifies the scheduler loop that the queue state changed.
@@ -134,6 +141,7 @@ impl QueueManager {
             semaphore: Arc::new(Semaphore::new(max)),
             max_concurrent: AtomicUsize::new(max),
             suspended: AtomicBool::new(false),
+            download_dir: RwLock::new(config.download_dir),
             order: Mutex::new(Vec::new()),
             notify: Arc::new(Notify::new()),
             scheduler_cancel: CancellationToken::new(),
@@ -159,6 +167,27 @@ impl QueueManager {
     /// The global speed limiter, so other components can share the same instance.
     pub fn limiter(&self) -> SpeedLimiter {
         self.inner.limiter.clone()
+    }
+
+    /// The directory downloads are currently saved into (the live value of
+    /// `AppSettings.download_dir`).
+    pub fn download_dir(&self) -> PathBuf {
+        self.inner
+            .download_dir
+            .read()
+            .expect("download_dir lock poisoned")
+            .clone()
+    }
+
+    /// Update the directory new and resumed downloads are saved into, applying a
+    /// settings change without an app restart (Req 11.5). In-flight downloads
+    /// keep writing to their original destination until they finish.
+    pub fn set_download_dir(&self, dir: PathBuf) {
+        *self
+            .inner
+            .download_dir
+            .write()
+            .expect("download_dir lock poisoned") = dir;
     }
 
     // ─── Public queue operations ─────────────────────────────────────────────────
@@ -187,43 +216,79 @@ impl QueueManager {
         }
 
         self.inner.persistence.save_download(&item).await.ok();
+        // Enqueuing a new download is an explicit "start working" signal — lift any
+        // scheduler suspension left over from startup restore or a previous
+        // pause_all so the new download actually starts (it would otherwise sit in
+        // `Queued` forever). Restored *paused* downloads stay paused: the scheduler
+        // only starts `Queued` items, so this never auto-resumes interrupted work.
+        self.inner.suspended.store(false, Ordering::SeqCst);
         self.emit_queue_changed().await;
         self.inner.notify.notify_one();
         Ok(id)
     }
 
-    /// Pause a single active download, releasing its concurrency permit (Req 2.3).
+    /// Pause a single download, releasing its concurrency permit (Req 2.3).
     ///
-    /// Delegates to the engine, which cancels the segment tasks, records offsets,
-    /// and sets the status to `Paused`. The running task wrapper then drops the
-    /// permit and notifies the scheduler so the next queued item can start.
+    /// If the download is actively running it has a cancellation token and is
+    /// paused through the engine (segment tasks cancelled, offsets recorded). If it
+    /// is merely `Queued` (captured/added but not yet started by the scheduler)
+    /// there is no token to cancel, so it is simply marked `Paused` directly —
+    /// pausing a not-yet-started download must not error.
     pub async fn pause(&self, id: &str) -> Result<()> {
-        downloader::pause_download(
-            &self.inner.app,
-            &self.inner.downloads,
-            id,
-            &self.inner.cancel_tokens,
-            &self.inner.persistence,
-        )
-        .await?;
+        let is_active = self.inner.cancel_tokens.lock().await.contains_key(id);
+        if is_active {
+            downloader::pause_download(
+                &self.inner.app,
+                &self.inner.downloads,
+                id,
+                &self.inner.cancel_tokens,
+                &self.inner.persistence,
+            )
+            .await?;
+        } else {
+            let snapshot = {
+                let mut map = self.inner.downloads.lock().await;
+                let item = map
+                    .get_mut(id)
+                    .ok_or_else(|| anyhow!("unknown download id: {id}"))?;
+                // Only pause items that are pending/active; leave terminal states
+                // (complete) untouched.
+                if matches!(
+                    item.status,
+                    DownloadStatus::Queued | DownloadStatus::Downloading
+                ) {
+                    item.status = DownloadStatus::Paused;
+                    item.speed = 0;
+                    item.eta = None;
+                }
+                item.clone()
+            };
+            self.inner.persistence.save_download(&snapshot).await.ok();
+        }
         self.emit_queue_changed().await;
         Ok(())
     }
 
-    /// Resume a single paused download by re-queuing it for the scheduler.
+    /// Resume a single download by re-queuing it for the scheduler.
     ///
-    /// The item is set back to `Queued`; the scheduler picks it up (subject to the
-    /// concurrency limit) and resumes it from its saved segment offsets.
+    /// `Paused` items are re-queued and resumed from their saved segment offsets;
+    /// `Error` items are re-queued for a fresh retry (the UI's "Retry" action
+    /// routes here). The scheduler picks the item up subject to the concurrency
+    /// limit.
     pub async fn resume(&self, id: &str) -> Result<()> {
         {
             let mut map = self.inner.downloads.lock().await;
             let item = map
                 .get_mut(id)
                 .ok_or_else(|| anyhow!("unknown download id: {id}"))?;
-            if item.status == DownloadStatus::Paused {
+            if matches!(item.status, DownloadStatus::Paused | DownloadStatus::Error) {
                 item.status = DownloadStatus::Queued;
+                item.error_message = None;
             }
         }
+        // Resuming is an explicit "go" signal: lift any scheduler suspension left
+        // over from startup restore or pause_all so this download actually starts.
+        self.inner.suspended.store(false, Ordering::SeqCst);
         self.persist(id).await;
         self.emit_queue_changed().await;
         self.inner.notify.notify_one();
@@ -237,7 +302,7 @@ impl QueueManager {
 
         // Discard the partial file on disk (cancel = discard incomplete download).
         if let Some(filename) = self.filename_of(id).await {
-            let dest = downloads_dir().join(&filename);
+            let dest = self.download_dir().join(&filename);
             let _ = tokio::fs::remove_file(&dest).await;
         }
 
@@ -569,6 +634,7 @@ impl QueueManager {
             map.get(&id).and_then(paused_state_for_resume)
         };
 
+        let dest_dir = self.download_dir();
         let token = CancellationToken::new();
         let outcome = match resume_state {
             Some(state) => {
@@ -581,6 +647,7 @@ impl QueueManager {
                     token,
                     inner.cancel_tokens.clone(),
                     inner.persistence.clone(),
+                    dest_dir,
                 )
                 .await
             }
@@ -592,6 +659,7 @@ impl QueueManager {
                     inner.limiter.clone(),
                     token,
                     inner.cancel_tokens.clone(),
+                    dest_dir,
                 )
                 .await
             }
@@ -658,7 +726,7 @@ impl QueueManager {
                 return;
             }
         };
-        let output_path = downloads_dir().join(&filename);
+        let output_path = self.download_dir().join(&filename);
 
         // Register a cancellation token so cancel/pause can stop this download.
         let cancel = CancellationToken::new();
@@ -696,14 +764,26 @@ impl QueueManager {
         let _ = progress_task.await;
         inner.cancel_tokens.lock().await.remove(id);
 
+        // On success, resolve the real file path and its size on disk *before*
+        // taking the registry lock (metadata is async). yt-dlp names the file from
+        // a template, so the path it reported is the source of truth for the card
+        // name and for Open/Reveal/Delete.
+        let completed = match &outcome {
+            Ok(final_path) => {
+                let path = final_path.clone().unwrap_or_else(|| output_path.clone());
+                let size = tokio::fs::metadata(&path).await.map(|m| m.len()).ok();
+                Some((path, size))
+            }
+            Err(_) => None,
+        };
+
         // Record the terminal state, mirroring the engine's progress contract.
         {
             let mut map = inner.downloads.lock().await;
             if let Some(it) = map.get_mut(id) {
-                match outcome {
-                    Ok(()) => {
+                match completed {
+                    Some((path, size)) => {
                         it.status = DownloadStatus::Complete;
-                        it.downloaded = it.total_size;
                         it.speed = 0;
                         it.eta = Some(0);
                         it.completed_at = Some(
@@ -712,10 +792,27 @@ impl QueueManager {
                                 .unwrap_or_default()
                                 .as_secs(),
                         );
+                        if let Some(name) = path.file_name() {
+                            it.filename = name.to_string_lossy().into_owned();
+                        }
+                        it.output_path = Some(path);
+                        // Replace the percentage model (total_size == 100) with the
+                        // real byte size so the card shows the actual file size.
+                        match size {
+                            Some(bytes) if bytes > 0 => {
+                                it.total_size = bytes;
+                                it.downloaded = bytes;
+                            }
+                            _ => it.downloaded = it.total_size,
+                        }
                     }
-                    Err(e) => {
+                    None => {
+                        let err = match &outcome {
+                            Err(e) => format!("{e:#}"),
+                            Ok(_) => String::new(),
+                        };
                         it.status = DownloadStatus::Error;
-                        it.error_message = Some(format!("{e:#}"));
+                        it.error_message = Some(err);
                         it.speed = 0;
                         it.eta = None;
                     }

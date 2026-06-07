@@ -237,6 +237,26 @@
               <input id="set-auto-categorize" type="checkbox" />
               <span>Auto-sort completed downloads into category folders</span>
             </label>
+
+            <label class="field__check">
+              <input id="set-resume-on-startup" type="checkbox" />
+              <span>Resume interrupted downloads automatically on startup</span>
+            </label>
+
+            <label class="field__check">
+              <input id="set-minimize-to-tray" type="checkbox" />
+              <span>Close button hides to the system tray instead of quitting</span>
+            </label>
+
+            <label class="field__check">
+              <input id="set-notifications-enabled" type="checkbox" />
+              <span>Show a desktop notification when a download completes</span>
+            </label>
+
+            <label class="field__check">
+              <input id="set-confirm-on-delete" type="checkbox" />
+              <span>Ask for confirmation before deleting a file from disk</span>
+            </label>
           </fieldset>
 
           <fieldset class="settings__group glass-panel">
@@ -341,6 +361,18 @@
             <button class="btn-primary" type="submit">Download</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- ─── Confirm modal ──────────────────────────────────────────────── -->
+    <div class="modal-backdrop" id="confirm-modal" hidden>
+      <div class="modal modal--sm" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h2 class="modal__title" id="confirm-title">Confirm</h2>
+        <p class="modal__message" id="confirm-message"></p>
+        <div class="modal__actions">
+          <button class="btn-ghost" type="button" id="confirm-cancel">Cancel</button>
+          <button class="btn-primary" type="button" id="confirm-ok">Confirm</button>
+        </div>
       </div>
     </div>
 

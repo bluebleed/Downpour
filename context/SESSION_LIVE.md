@@ -1,0 +1,1110 @@
+
+## Session 8f132bfe — Claude Code — 2026-06-07 08:08:40
+
+### 2026-06-07 08:08:40 — You
+go throught session live md and other files of this project. then we can continue from the last task ( not being able to compelte as usage limit by hit in antigravity)
+
+### 2026-06-07 08:08:44 — Claude
+I'll start by reading the project's memory and context files to understand where we left off. Let me explore the key files.
+
+### 2026-06-07 08:08:51 — Claude
+Let me read the session live file and working memory first — these track where we left off.
+
+### 2026-06-07 08:08:56 — Claude
+The SESSION_LIVE.md only has my current prompt. The WORKING_MEMORY has a TODO list. Let me check for the archive and recent git activity to pinpoint the last task that was interrupted in Antigravity.
+
+### 2026-06-07 08:09:06 — Claude
+SESSION_LIVE.md doesn't record what Antigravity was doing — it only has my current prompt. Let me look for the interrupted task by checking the uncommitted changes and the Antigravity-specific files.
+
+### 2026-06-07 08:09:16 — Claude
+I now have the full picture. Let me verify the state of the top TODO (the `download_dir` wiring) in the actual code, since that's the most concrete next code task.
+
+### 2026-06-07 08:09:42 — Claude
+I've gone through the session files. Here's what I found and where we stand.
+
+## What the session files tell me
+
+**SESSION_LIVE.md** only contains your current prompt — it never captured what Antigravity was mid-task on when the usage limit hit. So I reconstructed the state from the uncommitted work + memory files.
+
+**The interrupted Antigravity work was documentation/memory-architecture setup**, and it looks *complete*. The uncommitted changes are all docs, no code:
+- `?? ARCHITECTURE.md` (new) — full Case-B architecture record
+- `?? GEMINI.md` (new) — Antigravity session guide
+- `?? context/` (new) — `WORKING_MEMORY.md` + `SESSION_LIVE.md`
+- `M AGENTS.md`, `M CLAUDE.md` — updated to reflect "Sprint 1 COMPLETE"
+
+None of `src-tauri/` or `src/` is touched. So Antigravity wasn't mid-code-edit — it was wiring up your tri-level memory system and refreshing the docs to mark Sprint 1 done.
+
+## The actual next task (code)
+
+Per [WORKING_MEMORY.md](context/WORKING_MEMORY.md) and the [ARCHITECTURE.md](ARCHITECTURE.md) TODO list, the **#1 open code item** is real and I verified it in the source:
+
+> **Wire `AppSettings.download_dir` into the download engine.** [downloader.rs:222-224](src-tauri/src/downloader.rs#L222-L224) — `downloads_dir()` returns the OS default and **ignores the configured setting**:
+> ```rust
+> pub fn downloads_dir() -> PathBuf {
+>     dirs::download_dir().unwrap_or_else(std::env::temp_dir)
+> }
+> ```
+
+This is an actual inconsistency: [categorizer.rs:105](src-tauri/src/categorizer.rs#L105) already respects `settings.download_dir`, but the downloader writes files to the OS default first. Call sites that need threading: [downloader.rs:463](src-tauri/src/downloader.rs#L463), [downloader.rs:961](src-tauri/src/downloader.rs#L961), [queue.rs:240](src-tauri/src/queue.rs#L240), [queue.rs:661](src-tauri/src/queue.rs#L661), [lib.rs:327](src-tauri/src/lib.rs#L327).
+
+Before I start editing, one fork — since the interrupted task wasn't recorded, I want to confirm direction rather than guess:
+
+### 2026-06-07 08:10:30 — Claude
+Let me read the relevant code to understand how settings flow through the engine before editing.
+
+### 2026-06-07 08:10:36 — Claude
+I need to understand how settings are shared at runtime. Let me look at the state wiring in lib.rs and how the categorizer accesses settings.
+
+### 2026-06-07 08:10:51 — Claude
+Now I understand the state architecture. Let me look at the actual call sites and function signatures to decide how to thread the configured dir through.
+
+### 2026-06-07 08:10:56 — Claude
+Let me see the queue.rs call sites and how it invokes the downloader functions.
+
+### 2026-06-07 08:11:19 — Claude
+Let me find exactly where the queue spawns the downloader core functions.
+
+### 2026-06-07 08:11:29 — Claude
+Let me read the key entry-point signatures: `downloader::run`, `resume_download`, and the queue `run_download` dispatcher and constructor/config.
+
+### 2026-06-07 08:11:52 — Claude
+I have the full call graph. Let me check `QueueConfig` and the `Categorizer` struct/constructor before designing the threading.
+
+### 2026-06-07 08:12:01 — Claude
+Let me read the `QueueManager::new` constructor and `QueueConfig::default` to wire in the new field.
+
+### 2026-06-07 08:12:43 — Claude
+I have the complete design. Let me check for existing call sites/tests that would break with signature changes before editing.
+
+### 2026-06-07 08:12:55 — Claude
+I have everything mapped. `resume_core` calls `download_core` at 4 sites (976, 1015, 1028, 1041) — all need threading. No tests use these signatures directly except the lib.rs QueueConfig literal. Let me set up a todo list and implement.
+
+### 2026-06-07 08:13:13 — Claude
+Now the edits. Starting with models.rs:
+
+### 2026-06-07 08:13:21 — Claude
+models.rs done. Now downloader.rs. First check its imports for `Path`:
+
+### 2026-06-07 08:13:24 — Claude
+`Path` is already imported. Now the downloader.rs edits:
+
+### 2026-06-07 08:13:46 — Claude
+Now `resume_download` and `resume_core`. Let me read the resume_download signature region and the recursive download_core calls:
+
+### 2026-06-07 08:14:02 — Claude
+Now the recursive `download_core` calls inside `resume_core` need `dest_dir`. They're all identical — replace all:
+
+### 2026-06-07 08:14:16 — Claude
+downloader.rs done. Now queue.rs. Update todos and edit the import, QueueInner, constructor, getter/setter, and the three call sites.
+
+### 2026-06-07 08:14:40 — Claude
+Now add the getter/setter methods near `limiter()`:
+
+### 2026-06-07 08:14:49 — Claude
+Now the three call sites — `run_download` (pass dest_dir to both downloader calls), `cancel`, and media:
+
+### 2026-06-07 08:15:01 — Claude
+queue.rs done. Now the Categorizer getter and lib.rs wiring:
+
+### 2026-06-07 08:15:11 — Claude
+`Path` is already used in categorizer.rs. Now lib.rs — three edits:
+
+### 2026-06-07 08:15:19 — Claude
+Now the completion categorizer — make the source path use the categorizer's configured dir instead of the OS default:
+
+### 2026-06-07 08:15:37 — Claude
+All edits done. Now format, lint, and test:
+
+### 2026-06-07 08:17:51 — Claude
+Clean — no clippy warnings. Now the tests:
+
+### 2026-06-07 08:21:11 — Claude
+All green: 181 unit + 10 integration tests pass, clippy clean. Let me add a focused test for the new live-dir behavior. Let me check how tests construct a `QueueManager`:
+
+### 2026-06-07 08:21:40 — Claude
+The full QueueManager isn't constructed in unit tests (needs a Tauri handle) — the e2e tests replicate scheduler primitives. Let me check whether the existing `capture_to_download_to_categorize_end_to_end` integration test already exercises a *custom* download_dir, which would be the natural regression coverage for this change:
+
+### 2026-06-07 08:22:04 — Claude
+The integration test reconstructs engine logic manually against a temp dir, so the real coverage for my change is structural: `downloads_dir()` is no longer called anywhere in the actual save path. Let me confirm that's airtight:
+
+### 2026-06-07 08:22:29 — Claude
+## Done — TODO #1 (`download_dir` wiring) is complete and verified
+
+The configured `AppSettings.download_dir` now flows end-to-end into the download engine. `downloads_dir()` is no longer called anywhere in the save path — it survives only as the default fallback for `QueueConfig`.
+
+**The wiring chain:**
+`AppSettings.download_dir` → `QueueConfig.download_dir` → `QueueInner.download_dir` (live `RwLock<PathBuf>`) → threaded as `dest_dir` into the engine.
+
+**Files changed:**
+- [models.rs](src-tauri/src/models.rs#L208) — added `download_dir` to `QueueConfig` (+ `#[serde(default)]` fallback resolver).
+- [downloader.rs](src-tauri/src/downloader.rs#L399) — threaded `dest_dir` through `run`, `resume_download`, `download_core`, `resume_core` (incl. the 4 recursive restart paths). Both `dest = dest_dir.join(...)` sites now use it.
+- [queue.rs](src-tauri/src/queue.rs#L548) — added live `download_dir` field + `download_dir()`/`set_download_dir()`; used in `run_download`, `cancel` (partial-file cleanup), and media downloads.
+- [categorizer.rs](src-tauri/src/categorizer.rs#L116) — added `download_dir()` getter.
+- [lib.rs](src-tauri/src/lib.rs#L388) — seed `QueueConfig` from settings, call `set_download_dir` in `update_settings` (live, no restart — Req 11.5), and resolve the completion-categorizer's source path from the configured dir instead of the OS default.
+
+**Design note:** in-flight downloads keep writing to their original destination if the dir changes mid-flight; only new/resumed downloads pick up the new path. The `RwLock` guard is never held across an `.await`.
+
+**Verification:** `cargo fmt` clean · `cargo clippy --all-targets` zero warnings · **191 tests pass** (181 unit + 10 integration).
+
+This is a **Case B** (project-architecture) change — once you've confirmed it, I'd suggest noting in [ARCHITECTURE.md](ARCHITECTURE.md) that the `download_dir` TODO is resolved and updating the WORKING_MEMORY TODO list. Want me to do that, and/or commit?
+
+---
+
+**Re: `/usage-credits`** — that's not one of this project's skills, and it isn't a command I can execute on your behalf; I have no tool to read your account's credit/usage balance. If you're trying to check usage in Claude Code, the built-in command is **`/usage`** (or `/status`) — type it directly at the prompt and the CLI handles it locally. Did you mean to check your remaining usage, or something specific about this project?
+
+## Session da7b946e — Antigravity (Claude Sonnet 4.6 (Thinking)) — 2026-06-07 05:28:06
+
+### 2026-06-07 05:28:06 — You
+ANalyse the current project build by kiro. make necessary files for antigravity, claudecode and learn about this project so that we can work on it. from now on.
+
+### 2026-06-07 05:28:06 — Antigravity
+Let me start by thoroughly exploring the Downpour project structure before creating any documentation files.
+
+### 2026-06-07 05:28:39 — Antigravity
+Now let me read the key source files to understand what's actually been implemented:
+
+### 2026-06-07 05:28:52 — Antigravity
+Now let me check the context directory and existing working memory, then check what Claude's global config looks like:
+
+### 2026-06-07 05:29:00 — Antigravity
+Now I have a thorough understanding of the entire project. Let me create all necessary files:
+1. `GEMINI.md` for Antigravity (project-level)
+2. Update `CLAUDE.md` to be more helpful (it already points to AGENTS.md)
+3. Create `context/WORKING_MEMORY.md` for sprint context
+4. Create the ARCHITECTURE.md for permanent project memory
+
+### 2026-06-07 05:29:08 — Antigravity
+I now have a comprehensive understanding of the entire project. Kiro built a **feature-complete** IDM-style download manager. Let me now create all the necessary files:
+
+### 2026-06-07 05:30:27 — Antigravity
+Now create the `context/WORKING_MEMORY.md` for sprint memory and update `CLAUDE.md` to point to the new ARCHITECTURE.md:
+
+### 2026-06-07 05:30:47 — Antigravity
+Now update `CLAUDE.md` to reference the new ARCHITECTURE.md:
+
+### 2026-06-07 05:31:10 — Antigravity
+Now let me also update `AGENTS.md` to mention the new files and reflect the completed state:
+
+### 2026-06-07 05:31:15 — Antigravity
+The AGENTS.md has outdated info (e.g., "queue.rs skeleton, not yet wired" — but it's been fully implemented). Let me update it:
+
+### 2026-06-07 05:31:53 — Antigravity
+All files are created and updated. Let me do a final verification of what was created:
+
+### 2026-06-07 05:31:58 — Antigravity
+All 4 files are in place. Here's what I did and learned:
+
+---
+
+## Summary
+
+### What Kiro Built
+
+**Downpour is feature-complete.** All 17 task groups in the Kiro spec are marked `[x]`. It's a fully-functional IDM-style download manager with:
+
+| Component | What it does |
+|---|---|
+| [downloader.rs](file:///d:/workspace/desktop-apps/Downpour/src-tauri/src/downloader.rs) | Parallel segmented downloads (HTTP `Range`), pause/resume, 6-attempt exponential retry, speed/ETA, progress throttled to 3/sec |
+| [queue.rs](file:///d:/workspace/desktop-apps/Downpour/src-tauri/src/queue.rs) | `Arc<Semaphore>` concurrency, FIFO, pause-all/resume-all, disk-full handling, restore-from-disk |
+| [speed_limiter.rs](file:///d:/workspace/desktop-apps/Downpour/src-tauri/src/speed_limiter.rs) | Token-bucket rate limiter shared globally |
+| [persistence.rs](file:///d:/workspace/desktop-apps/Downpour/src-tauri/src/persistence.rs) | JSON state with 500ms debounced writes, corruption recovery |
+| [media_extractor.rs](file:///d:/workspace/desktop-apps/Downpour/src-tauri/src/media_extractor.rs) | yt-dlp/ffmpeg wrapper, forbidden-flags-enforced |
+| [capture_server.rs](file:///d:/workspace/desktop-apps/Downpour/src-tauri/src/capture_server.rs) | axum server on `127.0.0.1:53472` for the browser extension |
+| `src/` | Glassmorphism UI with 4 views: Downloads, Queue, Media, Settings |
+| `extension/` | MV3 browser extension with cookie/header capture + filtering |
+
+### Files Created/Updated
+
+| File | Role |
+|---|---|
+| [GEMINI.md](file:///d:/workspace/desktop-apps/Downpour/GEMINI.md) | **NEW** — Antigravity session-start checklist, module map, command list, invariants |
+| [ARCHITECTURE.md](file:///d:/workspace/desktop-apps/Downpour/ARCHITECTURE.md) | **NEW** — Permanent (Case B) design decisions, event contract, constraints, open TODOs |
+| [context/WORKING_MEMORY.md](file:///d:/workspace/desktop-apps/Downpour/context/WORKING_MEMORY.md) | **NEW** — Active sprint memory (Case C) with current status and gotchas |
+| [CLAUDE.md](file:///d:/workspace/desktop-apps/Downpour/CLAUDE.md) | **UPDATED** — References new files, reflects completed sprint |
+| [AGENTS.md](file:///d:/workspace/desktop-apps/Downpour/AGENTS.md) | **UPDATED** — Accurate architecture diagram, updated roadmap (5 items ✅, 3 remaining) |
+
+### 3 Open TODOs worth knowing
+
+1. **`downloads_dir()` ignores `AppSettings.download_dir`** — it always uses the OS default. Easy fix.
+2. **System tray** — plugin is registered but minimize-to-tray UI isn't built.
+3. **Scheduler suspends after restore** — the user must click "Resume All" after each app start. UX could be improved.
+
+### 2026-06-07 05:37:00 — You
+Our app, is basically working, But I also wanted is to be capture Youtube videos, instagram videos, X videos, and other social media videos or pictures. How can these features be added ?  before discuss do these 3 Open TODOs. the downloading progress bar is also missing.
+
+### 2026-06-07 05:37:00 — Antigravity
+Let me read all the relevant files before planning anything.
+
+### 2026-06-07 05:37:22 — Antigravity
+Now I have a complete picture. Let me look at a few more critical spots before creating the plan:
+
+### 2026-06-07 05:37:31 — Antigravity
+I have a thorough picture now. Let me create the implementation plan:
+
+--- (continued) Claude 8f132bfe ---
+
+### 2026-06-07 09:05:39 — You
+noting in ARCHITECTURE.md that the download_dir TODO is resolved and updating the WORKING_MEMORY TODO list and do that next todo ( all)
+
+### 2026-06-07 09:06:09 — Claude
+On it. Three actions: (1) mark the TODO resolved in ARCHITECTURE.md, (2) update WORKING_MEMORY.md, (3) implement the next TODO. Let me first investigate the next TODO ("Resume All on Startup") so I design it right, while doing the doc edits.
+
+Let me look at the settings and the restore/suspend logic to understand what's already there:
+
+### 2026-06-07 09:06:14 — Claude
+Let me read `restore_from_disk` to design the resume-on-startup behavior:
+
+### 2026-06-07 09:06:34 — Claude
+I understand the design. "Resume All on Startup" = auto-invoke `resume_all()` after restore when a new setting is enabled. Let me check what might break (settings tests) and the UI settings form before implementing:
+
+### 2026-06-07 09:06:52 — Claude
+All `AppSettings` literals use `..Default::default()` spread, so a new defaulted field is safe. Let me check the frontend settings form to add the UI toggle:
+
+### 2026-06-07 09:07:07 — Claude
+The form spreads `loadedSettings`, so the field round-trips automatically — I just need to expose a toggle. Let me find the `setAutoCategorize` element declaration and the HTML checkbox markup:
+
+### 2026-06-07 09:07:34 — Claude
+Let me read the settings section of index.html to place the toggle well:
+
+### 2026-06-07 09:07:40 — Claude
+I have everything. Let me set the new todo batch and execute all edits.
+
+### 2026-06-07 09:07:46 — Claude
+Now the doc updates. ARCHITECTURE.md — mark download_dir resolved and update the open-TODOs list:
+
+### 2026-06-07 09:08:01 — Claude
+Let me also update the related invariant in ARCHITECTURE.md:
+
+### 2026-06-07 09:08:10 — Claude
+Now WORKING_MEMORY.md — update the TODO list:
+
+### 2026-06-07 09:08:22 — Claude
+Now the code. Add the `resume_on_startup` field to settings.rs:
+
+### 2026-06-07 09:08:30 — Claude
+Now wire auto-resume after restore in lib.rs:
+
+### 2026-06-07 09:08:39 — Claude
+Now the UI toggle — index.html checkbox and main.js (declare, fill, collect):
+
+### 2026-06-07 09:08:52 — Claude
+Now add a test. Let me look at the settings.rs test module structure:
+
+### 2026-06-07 09:08:57 — Claude
+Let me check the test module's imports before adding the serde test:
+
+### 2026-06-07 09:09:05 — Claude
+I'll add the test after the `speed_limit_rejects_negative` test, using `serde_json` (a workspace dep) qualified inline:
+
+### 2026-06-07 09:11:40 — Claude
+One settings literal in persistence.rs doesn't use spread. Let me fix it:
+
+### 2026-06-07 09:11:55 — Claude
+This is a property-test builder. Let me add the field (the dedicated serde round-trip test I added already covers persistence of this field):
+
+### 2026-06-07 09:12:47 — Claude
+Clippy clean. Now the full test suite:
+
+### 2026-06-07 09:14:31 — Claude
+All green. Let me verify WORKING_MEMORY.md is still under the 2,500-char Case-C cap:
+
+### 2026-06-07 09:14:35 — Claude
+2,371 chars — just under the 2,500 cap (headroom is tight; the script would start archiving soon). Final todo done:
+
+### 2026-06-07 09:14:50 — Claude
+All three done. Here's the summary.
+
+## 1 & 2 — Docs updated
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — both the `download_dir` and "Resume All on Startup" items are now marked `[x]` resolved with implementation detail, and Invariant #5 updated to note the opt-in auto-resume.
+- **[WORKING_MEMORY.md](context/WORKING_MEMORY.md)** — TODO list updated (items 1 & 2 struck through as done; system tray flagged as needing a real build to verify). At 2,371/2,500 chars — getting close to the auto-archive threshold, FYI.
+
+## 3 — Next TODO implemented: "Resume All on Startup"
+
+I picked this over the literal next item (system tray) because **system tray can't be verified without a full app build/display**, which this environment lacks — better done on your machine. Resume-on-startup is backend logic + a setting, fully testable here.
+
+**Behavior:** new `AppSettings.resume_on_startup` (default `false`, preserving current behavior). When enabled, [lib.rs](src-tauri/src/lib.rs#L407) calls `queue.resume_all()` right after `restore_from_disk()`, so interrupted downloads auto-resume instead of waiting for a manual "Resume All".
+
+**Files changed:**
+- [settings.rs](src-tauri/src/settings.rs#L42) — added the field with `#[serde(default)]` (older settings files still load), plus default `false`.
+- [lib.rs](src-tauri/src/lib.rs#L407) — auto-resume after restore when the flag is set.
+- [index.html](index.html#L241) + [main.js](src/main.js#L1002) — a Settings-view checkbox ("Resume interrupted downloads automatically on startup"), wired through `fillSettingsForm` and `collectSettings`.
+- [persistence.rs](src-tauri/src/persistence.rs#L585) — fixed the one non-spread `AppSettings` literal.
+
+**Verification:** `cargo fmt` clean · `cargo clippy --all-targets` zero warnings · **194 tests pass** (184 unit incl. 3 new `resume_on_startup` tests — default-off, missing-field-deserializes-to-false, round-trip-when-enabled — + 10 integration).
+
+Both features (`download_dir` wiring and `resume_on_startup`) are **Case B** architectural changes already reflected in ARCHITECTURE.md. Nothing is committed yet — want me to commit all of this (the two features + doc updates) on the `main` branch, or branch first?
+
+### 2026-06-07 09:17:48 — You
+Uodate working working memory using the script we made for it so that old memory can be copies to another file that script will made., so that old memory can be copied to another file.
+i will commit later. You complete the todo list
+
+### 2026-06-07 09:18:01 — Claude
+The user wants this routed through the Case C gatekeeper script (which auto-archives overflow to `context/ARCHIVE_MEMORY.md` once the file exceeds 2,500 chars). I'll invoke the `/memory-write` skill.
+
+### 2026-06-07 09:18:20 — Claude
+This is correctly Case C. Running the gatekeeper script from the project root:
+
+### 2026-06-07 09:18:58 — Claude
+Saved to Active Sprint Memory. The script archived 14 older entries to keep the file under the 2,500-char cap. Let me confirm the archive file was created:
+
+### 2026-06-07 09:19:35 — Claude
+Done. The memory routing worked cleanly:
+
+- **`context/ARCHIVE_MEMORY.md`** (created, 926 B) — the script copied the oldest entries here: the original *Current Status*, *Key Context*, and *Known TODOs* preamble.
+- **`context/WORKING_MEMORY.md`** (2,535 B, under the 2,500-**char** cap — the byte count is higher because of multi-byte glyphs like ✅/→) — now holds the live TODO list, the critical gotchas, and today's sprint fact as the newest entry.
+
+The script reported "Archived oldest entry…" 14 times, then "Fact added to Working Memory successfully."
+
+## Status of the todo list
+
+The in-session todo list is **fully complete** — both features shipped and verified (fmt clean, clippy zero warnings, 194 tests pass), docs updated, and memory archived.
+
+The remaining roadmap items in WORKING_MEMORY are **environment-blocked**, not skipped:
+
+| TODO | Why I can't complete it here |
+|---|---|
+| System tray + minimize-to-tray | Needs a full `tauri build` with a webview/display to verify it actually renders/works — not available in this agent env. Writing it blind and claiming success would be dishonest. |
+| Test UI end-to-end (4 views) | Requires launching the GUI app. |
+| Load `extension/` in Chrome | Requires a browser + manual capture-flow check. |
+| Expand `content.js` media detection | Doable here, but only meaningfully testable against live sites in a browser. |
+
+These are best done on your machine where the app builds and a browser is available.
+
+**Your move:** I left everything uncommitted as you asked. Two options if you want me to keep going:
+1. I can write the **system-tray code** now, clearly marked *unverified* (you'd build + confirm on your machine), or
+2. I can tackle **`content.js` media detection** (pure logic, partially testable here).
+
+Or stop here so you can commit. Which would you like?
+
+### 2026-06-07 09:20:56 — You
+you code and i will test ( provide steps to test)
+
+### 2026-06-07 09:21:06 — Claude
+I'll implement system tray + minimize-to-tray. Let me first read the Tauri config and manifest to wire it correctly.
+
+### 2026-06-07 09:21:40 — Claude
+Let me check the capabilities config (needed for tray/notification permissions) and the icon situation:
+
+### 2026-06-07 09:22:38 — Claude
+I can actually compile-check this — earlier `cargo clippy` fully typechecked the Tauri code (only the *windowed* `tauri build`/runtime needs a display). So I'll implement tray + minimize-to-tray + completion notifications, then verify it compiles. Starting with the manifest:
+
+### 2026-06-07 09:22:45 — Claude
+Now lib.rs. Let me re-read the current imports and the setup tail (it changed since my earlier read):
+
+### 2026-06-07 09:22:50 — Claude
+Now I'll add the imports and type alias:
+
+### 2026-06-07 09:23:03 — Claude
+Now let me add a tray builder + completion notifier. Let me read the end of `spawn_completion_categorizer` to place them before the app entry point:
+
+### 2026-06-07 09:23:27 — Claude
+Now wire it all into `setup` and manage the flag:
+
+### 2026-06-07 09:23:37 — Claude
+Now update `update_settings` to keep the live flag in sync:
+
+### 2026-06-07 09:23:52 — Claude
+Now I'll expose the relevant toggles in the UI so they're testable. Adding `minimize_to_tray` and `notifications_enabled` checkboxes:
+
+### 2026-06-07 09:24:07 — Claude
+Now let me compile-check the tray code with clippy (this is where API mismatches would surface):
+
+### 2026-06-07 09:24:43 — Claude
+Compiles cleanly with the `tray-icon` feature — no errors or warnings. Now the full test suite to confirm nothing regressed:
+
+### 2026-06-07 09:27:21 — Claude
+Everything compiles and all **194 tests pass** (184 unit + 10 integration), `cargo fmt` and `clippy` clean — including the new `tray-icon` dependency.
+
+## What I built (system tray + native notifications — the last roadmap TODO)
+
+**Backend** ([lib.rs](src-tauri/src/lib.rs)):
+- `build_tray()` — a tray icon (tooltip "Downpour") with a **Show / Hide / Quit** menu; left-clicking the icon restores the window. Reuses the embedded window icon.
+- **Minimize-to-tray**: a live `Arc<AtomicBool>` seeded from `minimize_to_tray`; the window's `CloseRequested` handler calls `prevent_close()` + `hide()` when enabled. Updated live in `update_settings` (no restart needed).
+- `spawn_completion_notifier()` — listens for completed downloads (deduped per id) and fires a native notification when `notifications_enabled` is on.
+- [Cargo.toml](src-tauri/src/../Cargo.toml#L16) — added the `tray-icon` feature to `tauri`.
+
+**Frontend** ([index.html](index.html), [main.js](src/main.js)) — added two Settings toggles so you can exercise the behavior: *"Close button hides to the system tray…"* and *"Show a desktop notification when a download completes."*
+
+---
+
+## How to test (run `npm run tauri dev` or `run.bat` — first launch recompiles Rust)
+
+**1. Tray icon appears**
+- After the window opens, check the system tray (Windows: bottom-right, maybe under the `^` overflow arrow). A Downpour icon with tooltip "Downpour" should be there.
+
+**2. Tray menu + click-to-restore**
+- Right-click the tray icon → menu shows **Show Downpour / Hide to Tray / Quit Downpour**.
+- Click **Hide to Tray** → window disappears.
+- **Left-click** the tray icon → window reappears and focuses.
+- Right-click → **Quit Downpour** → app fully exits and the tray icon disappears.
+
+**3. Minimize-to-tray on close (live setting)**
+- Settings view → check **"Close button hides to the system tray instead of quitting"** → **Save settings**.
+- Click the window's **✕** → window hides to tray (app keeps running). Restore it via the tray.
+- Uncheck the setting → **Save** → click **✕** → app quits normally. *(Confirms the toggle applies without a restart.)*
+
+**4. Completion notification**
+- Keep **"Show a desktop notification when a download completes"** checked (default on).
+- Start a download of a small direct-file URL and let it finish → a **"Download complete"** notification with the filename should pop.
+- Uncheck the setting → Save → download again → no notification.
+- *Windows note:* notifications must be allowed for the app in Windows Settings → Notifications (app id `com.downpour.app`); dev builds occasionally need this enabled once.
+
+---
+
+**If something doesn't appear:** the most likely culprit is the tray icon image — the bundle config references PNG/icns files that aren't in the repo (only `icon.ico` is). The code guards against a missing icon (tray still builds), but on Windows a tray entry needs an image to be visible. If the icon is missing, run `npm run tauri icon path/to/icon.png` to generate the full set. Tell me what you observe and I'll adjust.
+
+Nothing committed — it's yours to test first. Want me to mark this TODO done in ARCHITECTURE.md/WORKING_MEMORY once you confirm it works?
+
+### 2026-06-07 09:34:14 — You
+WHen I am downloading, vlc from web, it adds them to queue instead of starting download automatically, secondlly when i resume those i got an error Action failed: no active cancellation token for download fd9b2fee-1d23-4fc7-9e84-588a93260217
+
+### 2026-06-07 09:34:52 — Claude
+Two real bugs. Let me investigate both — first locate the error string and the suspend/scheduler logic.
+
+### 2026-06-07 09:35:00 — Claude
+Let me read the pause function (bug 2 source) and the restore/scheduler region (bug 1):
+
+### 2026-06-07 09:35:57 — Claude
+Bug 1 is clear: `restore_from_disk` sets `suspended = true`, and the scheduler skips **all** starts while suspended — so newly captured downloads sit in Queued until you click Resume All. Let me read `pause_all`/`resume_all`/`pause` and the frontend action wiring to fix bug 2 correctly:
+
+### 2026-06-07 09:36:05 — Claude
+Let me see how the frontend decides which action buttons to show per status:
+
+### 2026-06-07 09:37:39 — Claude
+Now I fully understand both bugs — and they share a root cause:
+
+**Bug 1:** `restore_from_disk()` unconditionally sets `suspended = true` (even on a fresh start with nothing to restore). The scheduler skips **all** starts while suspended, so captured downloads sit in `queued` until you click Resume All.
+
+**Bug 2:** The UI shows a **Pause** button for `queued` items ([main.js:300-304](src/main.js#L300)). Pausing a queued item that never started calls `downloader::pause_download`, which requires an active cancellation token — there isn't one → `"no active cancellation token"`. (You read it as "resume," but the failing action is pausing a stuck-queued item.)
+
+Let me fix both. First, the scheduler suspension — explicit "go" actions (`enqueue`, `resume`) should lift it:
+
+### 2026-06-07 09:37:59 — Claude
+Now the `resume` method — lift suspension and also handle the `Error`→retry case (the UI's "Retry" routes here):
+
+### 2026-06-07 09:38:24 — Claude
+Both fixes in. Let me compile-check and run the suite:
+
+### 2026-06-07 09:39:40 — Claude
+Both bugs fixed, clippy clean, **194 tests pass**.
+
+## Root cause & fixes ([queue.rs](src-tauri/src/queue.rs))
+
+Both symptoms came from the scheduler's `suspended` flag, which `restore_from_disk()` sets to `true` on **every** launch (even a fresh start). While suspended, the scheduler refuses to start anything — so captured downloads got stuck in `queued`, and pausing a never-started queued item hit the "no active cancellation token" error.
+
+**Fix 1 — auto-start (Bug 1):** `enqueue()` and `resume()` now clear `suspended`. Adding or resuming a download is an explicit "go" signal, so it lifts any leftover suspension from startup-restore or `pause_all`. Captured downloads start immediately. *Interrupted* downloads are restored as `Paused` and the scheduler only starts `Queued` items, so this never accidentally auto-resumes interrupted work — your `resume_on_startup` setting still governs that.
+
+**Fix 2 — pause/resume robustness (Bug 2):**
+- `pause()` now checks for an active cancellation token. If the item is actually running → engine pause (as before). If it's only `Queued` (no token) → it's marked `Paused` directly instead of erroring.
+- `resume()` also handles `Error` items (the UI's **Retry** button routes here) by re-queuing and clearing the error message.
+
+## How to test (`npm run tauri dev` / `run.bat`)
+
+1. **Auto-start from browser capture (Bug 1):**
+   - With the extension active, start a download in the browser (your VLC case).
+   - It should appear in Downpour and **immediately go to `downloading`** (not sit in `queued`). Let it finish.
+   - Also test a fresh launch: close Downpour fully, reopen, capture one download → it should auto-start.
+
+2. **Pause/resume a queued item (Bug 2):**
+   - Queue several large downloads beyond your max-concurrent so some stay `queued`.
+   - Click **Pause** on a `queued` one → it becomes `paused` with **no error toast** (previously: "no active cancellation token").
+   - Click **Resume** on it → it returns to `queued`/`downloading`.
+
+3. **Resume interrupted downloads after restart:**
+   - Start a download, quit mid-way, relaunch → it shows `paused`.
+   - Click **Resume** on it → it resumes from where it left off (this also confirms a single resume lifts the suspension).
+
+4. **Retry an errored download:** if one errors, the **Retry** (↻) button should re-queue it instead of doing nothing.
+
+Note: I couldn't add automated tests for these — the `QueueManager` methods need a live Tauri `AppHandle` that the test harness doesn't construct (the existing queue tests use pure-function/primitive reconstructions). So these rely on your manual verification. Still uncommitted. Let me know how the four scenarios behave.
+
+### 2026-06-07 09:46:03 — You
+No progress bar,  IDM downlaoded but 0%, getting norfication from tray icon( Showing powershell instead of app name)  and no open folder and open file button.
+
+### 2026-06-07 09:46:24 — Claude
+Several issues to untangle. The critical one is the **0% / no progress bar** even on completed downloads. Let me investigate the frontend rendering and data flow.
+
+### 2026-06-07 09:46:43 — Claude
+Let me read the full card-render function to see exactly how size and progress are shown:
+
+### 2026-06-07 09:47:15 — Claude
+The screenshot reveals the real bug: those sizes (10.3 MB, 734.3 KB, 4.7 GB) are the **`downloaded`** values, and **`total_size` is 0** — so `pct = downloaded/0 → 0%` and the bar never fills, even on COMPLETE. The HEAD probe isn't getting a Content-Length for these (common with captured downloads). Let me look at the engine's single-stream path:
+
+### 2026-06-07 09:47:22 — Claude
+Let me read the completion tail of `single_stream`:
+
+### 2026-06-07 09:47:27 — Claude
+Let me check `mark_complete`:
+
+### 2026-06-07 09:48:30 — Claude
+Found it. Two backend gaps:
+1. `single_stream` ignores the **GET response's** `Content-Length` — when HEAD returns no size, `total` stays 0 forever.
+2. `mark_complete` never sets `total_size`, so even finished unknown-size downloads stay at 0%.
+
+Let me fix both. First, capture the size from the GET response in `single_stream`:
+
+### 2026-06-07 09:48:43 — Claude
+Now fix `mark_complete` to set `total_size` (and I'll thread the destination path through here too, for the open-file feature). Let me find its call sites:
+
+### 2026-06-07 10:05:41 — Claude
+Now add the `output_path` field to `DownloadItem`. Let me read its definition and constructor:
+
+### 2026-06-07 10:06:01 — Claude
+Now update the categorizer completion handler to record the moved path into `output_path`:
+
+### 2026-06-07 10:06:17 — Claude
+Let me check for any `DownloadItem` struct literals (which would now miss the field) and add the Tauri open/reveal commands. First the grep:
+
+### 2026-06-07 10:06:28 — Claude
+Let me check the non-test literal in capture_server.rs and the test ones:
+
+### 2026-06-07 10:06:43 — Claude
+capture_server uses `::new()` + mutation — safe. But I spotted a related clobber: `download_core` overwrites `total_size` with the HEAD length even when HEAD returns 0, discarding any size the extension captured. Let me fix that too:
+
+### 2026-06-07 10:07:32 — Claude
+Now the frontend: force completed items to 100%, and add **Open file** / **Open folder** buttons:
+
+### 2026-06-07 10:07:45 — Claude
+Now the backend commands. Update the import and add the open/reveal commands:
+
+### 2026-06-07 10:07:58 — Claude
+Now add the open/reveal commands. I'll place them after the queue commands section, before the media commands:
+
+### 2026-06-07 10:08:16 — Claude
+Now compile-check and run tests:
+
+### 2026-06-07 10:09:08 — Claude
+Two persistence test literals need the field. Let me add it:
+
+### 2026-06-07 10:11:10 — Claude
+A build artifact is locked — `downpour.exe` is in use, which means **your `tauri dev` app is currently running** and holding the binary. `clippy --all-targets` already compiled every target (including all test code) cleanly, so the code is valid. Let me confirm tests pass by retrying once (they may just need the lock released):
+
+### 2026-06-07 10:12:19 — Claude
+Lib tests pass (**184/184**); `clippy --all-targets` compiled every target including the integration tests. The integration-test *binary* couldn't be replaced only because **your `tauri dev` app is still running and holding `downpour.exe`** — not a code problem.
+
+Here's everything I fixed for the issues in your screenshot.
+
+## 1. No progress bar / stuck at 0% (the core bug) — fixed
+
+Your file sizes (10.3 MB, 734.3 KB, 4.7 GB) were actually the **`downloaded`** values; **`total_size` was 0**, so `downloaded ÷ 0 → 0%` and the bar never filled. Three root causes, all in [downloader.rs](src-tauri/src/downloader.rs):
+
+- **HEAD had no `Content-Length`** → `single_stream` now falls back to the **GET response's** `Content-Length`, so size + % + ETA are known during the download.
+- **`download_core` clobbered captured sizes** → it overwrote `total_size` with the HEAD value even when HEAD returned 0, throwing away the size the extension reported. Now it keeps the captured size if HEAD omits one.
+- **`mark_complete` never set `total_size`** → finished unknown-size downloads stayed 0%. Now, on completion, `total_size` adopts the bytes actually written.
+- Frontend guard ([main.js](src/main.js)): completed items always render **100%** — this also fixes your *existing* finished rows that were persisted with `total_size = 0`.
+
+## 2. No Open file / Open folder buttons — added
+
+- New `output_path` field on `DownloadItem` (records the final on-disk path, updated when the categorizer moves the file).
+- Two Tauri commands: `open_download_file` and `reveal_download_file` (cross-platform: `explorer /select,` on Windows, `open -R` on macOS, `xdg-open` on Linux).
+- Completed cards now show **↗ Open file** and **📂 Open containing folder** buttons.
+- Note: these resolve correctly for **newly** completed downloads. The rows already in your list completed before this change (no `output_path` stored), so for those the buttons may report "file not found" if the file was moved into a category subfolder — re-download one to see it work end-to-end.
+
+## 3. Notification says "PowerShell" instead of "Downpour" — expected in dev, not a bug
+
+On Windows, toast notifications are attributed to the launching process's *AppUserModelID*. Under `npm run tauri dev`, that's the PowerShell/dev launcher, so Windows labels the toast "PowerShell". This resolves automatically in an **installed build**: run `npm run tauri build`, install the MSI/NSIS output, and the toast will show "Downpour" with the app icon (it registers `com.downpour.app` as its AUMID via the Start-Menu shortcut). There's no reliable way to override this for an un-installed dev run.
+
+## To test
+**Stop the running app first** (so Rust can recompile), then `npm run tauri dev` again:
+
+1. **Progress:** start a fresh download (browser capture or the + button). It should now show a **filling progress bar with a real %** and ETA, and land at **100% / COMPLETE**.
+2. **Existing rows:** your already-complete rows should immediately show **100%** and a full bar after reload.
+3. **Open/folder:** on a newly completed download, click **↗** (opens the file) and **📂** (opens its folder with the file selected).
+4. **Notification name:** to see "Downpour" instead of "PowerShell", do a `tauri build` + install — optional/cosmetic.
+
+Still all uncommitted. Want me to also make **Open folder** fall back to opening the downloads directory when the exact file can't be found (so it works on your older rows too)?
+
+### 2026-06-07 10:16:39 — You
+change the icone of open folder as it not matching with the theme.  add Download Date and Time and also add Delete File button and also add x button to remove the entry from the interface.
+
+### 2026-06-07 10:17:20 — Claude
+Let me look at how icons and card metadata are rendered so my changes match the existing style (especially whether icons are emoji or SVG).
+
+### 2026-06-07 10:18:06 — Claude
+File-type icons are colorful emoji, but the **action buttons** use thin monochrome glyphs (↗ ⏸ ✕ ↻) — so the colorful 📂 emoji clashes. I'll use a monochrome SVG (inheriting `currentColor`) for the folder. Let me check the media-list renderer/handler too, since there are two:
+
+### 2026-06-07 10:18:50 — Claude
+The second renderer is the **queue view** (already uses `remove_download`, keeps file) — separate concern. I only need to change the **downloads list**. Let me read the date/format helpers and styles to stay consistent:
+
+### 2026-06-07 10:19:14 — Claude
+Now I'll implement all four changes. First, the `humanDateTime` helper:
+
+### 2026-06-07 10:19:26 — Claude
+Now the SVG icon constants and the updated `actionsFor` for completed downloads:
+
+### 2026-06-07 10:19:36 — Claude
+Now the date/time in the card meta row, the `ACTION_COMMANDS`, and the click handler:
+
+### 2026-06-07 10:19:57 — Claude
+Now the `ACTION_COMMANDS` and click handler (add delete/remove, confirm on delete, optimistic card removal):
+
+### 2026-06-07 10:20:06 — Claude
+Now the CSS — style the date span and ensure SVGs sit cleanly in buttons:
+
+### 2026-06-07 10:20:16 — Claude
+Now the backend `delete_download_file` command:
+
+### 2026-06-07 10:20:27 — Claude
+Now compile-check the backend:
+
+### 2026-06-07 10:21:14 — Claude
+Backend compiles clean. Let me verify the frontend card render region is consistent (no duplicate `status` declaration after my reordering):
+
+### 2026-06-07 10:21:19 — Claude
+Good — clean. Let me run the lib tests to confirm no regression:
+
+### 2026-06-07 10:22:01 — Claude
+All 184 lib tests pass, `clippy` clean, formatted. Here's what changed for your four requests.
+
+## 1. Open-folder icon — now theme-matching
+Replaced the colorful 📂 emoji with a **monochrome line SVG** that inherits `currentColor`, so it matches the other thin action glyphs (↗ ✕) — muted by default, brightens on hover. Same treatment for the new trash icon. Added `.btn-icon svg { display:block }` so they sit cleanly.
+
+## 2. Download date & time
+Added a `humanDateTime()` helper and a `download-card__date` field in the card meta row. Completed downloads show **"Completed <date time>"** (from `completedAt`); in-progress/queued show **"Added <date time>"** (from `createdAt`). Styled muted/monospace to match the meta row.
+
+## 3. Delete File button (🗑, destructive)
+- New backend command `delete_download_file` — deletes the file from disk (via the recorded `output_path`, falling back to `download_dir/filename`) **and** removes the entry.
+- Trash button on completed cards, styled as `btn-icon--danger` (turns red on hover).
+- **Confirms first** (`"Delete this file from disk? This cannot be undone."`) since it's irreversible.
+
+## 4. ✕ Remove-from-list button (non-destructive)
+- The ✕ on completed cards now calls `remove_download`, which **removes the entry but keeps the file on disk**.
+- This also fixes a latent bug: previously ✕ on a completed item called `cancel_download`, which *deleted the finished file*. Now Delete (🗑) and Remove (✕) are cleanly separated.
+
+**Completed-card action row is now:** ↗ Open file · ▢ Open folder · 🗑 Delete file · ✕ Remove from list.
+
+### Test (stop the running app so Rust recompiles, then `npm run tauri dev`)
+1. Complete a fresh download → card shows **"Completed <date/time>"** and the four themed buttons.
+2. **↗** opens the file, **folder icon** reveals it (monochrome, matches the theme).
+3. **🗑** → confirm dialog → file is deleted from disk and the row disappears.
+4. **✕** → row disappears but the file **stays** on disk (verify in Explorer).
+
+Note: for the rows already completed *before* this change, `output_path` wasn't stored, so **Delete** uses the `download_dir/filename` fallback — if that file was auto-sorted into a category subfolder, Delete will remove the list entry but may not find the moved file. Newly completed downloads record the exact path and work fully. Everything's still uncommitted.
+
+### 2026-06-07 10:30:26 — You
+Delete button does not ask for confirmation is should do that when the it is checked in the settings.
+
+### 2026-06-07 10:30:44 — Claude
+The user wants two things: (1) the delete confirmation should actually appear (it's likely silently passing because `window.confirm` is unreliable in the webview), and (2) it should be gated by a settings toggle. Let me check how the frontend imports Tauri APIs and whether the dialog plugin is available.
+
+### 2026-06-07 10:31:12 — Claude
+Only `@tauri-apps/api` is installed (no dialog plugin JS), and `window.confirm` is unreliable in the webview — that's why it silently passes. I'll build a small themed confirm modal (reusing the existing modal styles) gated by a new setting. Let me look at the existing add-modal to match its structure:
+
+### 2026-06-07 10:31:23 — Claude
+Let me see how the add-modal is shown/hidden in JS so my confirm modal behaves the same way:
+
+### 2026-06-07 10:32:00 — Claude
+Now I understand the structure. I'll add a `confirm_on_delete` setting (default on) and a themed confirm modal. Let me start with the backend setting:
+
+### 2026-06-07 10:32:26 — Claude
+I need the `default_true` helper for serde. Let me add it near the struct:
+
+### 2026-06-07 10:32:37 — Claude
+Now fix the non-spread `AppSettings` literal in persistence.rs:
+
+### 2026-06-07 10:32:51 — Claude
+Now the frontend. Add the confirm modal markup and the settings checkbox in index.html:
+
+### 2026-06-07 10:33:00 — Claude
+Now the JS: element refs, the `confirmDialog` helper, and wire the delete handler + settings fill/collect. First the refs and helper (placing them near the add-modal logic around line 255):
+
+### 2026-06-07 10:33:16 — Claude
+Now update the delete branch in the click handler to use the setting + themed dialog instead of `window.confirm`:
+
+### 2026-06-07 10:33:26 — Claude
+Now wire the settings checkbox (ref, fill, collect):
+
+### 2026-06-07 10:33:33 — Claude
+Now the CSS — add the `.btn-danger` and `.modal__message` / `.modal--sm` styles. Let me check existing button styles to mirror:
+
+### 2026-06-07 10:33:54 — Claude
+Now the `.modal__message` and `.modal--sm` styles. Let me find the modal block:
+
+### 2026-06-07 10:34:11 — Claude
+Now compile-check the backend and run lib tests:
+
+### 2026-06-07 10:35:30 — Claude
+All green — clippy clean (all targets), 184 tests pass.
+
+## What I fixed
+
+You were right on both counts: the old `window.confirm()` is unreliable inside the Tauri webview (it was silently returning, so deletion went straight through), and there was no setting to control it. Now:
+
+**New setting — `confirm_on_delete`** ([settings.rs](src-tauri/src/settings.rs)): defaults to **on**, `#[serde(default = "default_true")]` so existing settings files load with it enabled. Exposed as a Settings checkbox: *"Ask for confirmation before deleting a file from disk."*
+
+**Real themed confirm dialog** (no more `window.confirm`): a glassmorphism modal reusing the app's existing `.modal` styles, with a red **Delete** button (`.btn-danger`) and Cancel. It supports click-outside and Esc to cancel.
+
+**Gated delete flow** ([main.js](src/main.js)): when you click 🗑, the handler reads the live setting:
+- **Setting on (default)** → shows the confirm modal naming the file; deletes only if you click **Delete**.
+- **Setting off** → deletes immediately, no prompt.
+
+If you cancel, the card stays (it returns before invoking the command).
+
+## Test (stop the app so it rebuilds, then `npm run tauri dev`)
+1. Complete a download, click **🗑** → a styled **"Delete file"** dialog appears naming the file. **Cancel** keeps it; **Delete** removes file + entry.
+2. Settings → uncheck **"Ask for confirmation before deleting a file from disk"** → Save. Now 🗑 deletes immediately with no prompt.
+3. Re-check it → confirmation returns. (Esc / click-outside both cancel.)
+
+Still uncommitted. Want me to wire the same confirm setting into the queue view's ✕ as well, or leave that as-is (it only removes the entry, never deletes the file)?
+
+### 2026-06-07 10:37:06 — You
+now how will it work on youtube videos download?
+
+### 2026-06-07 10:37:18 — Claude
+Good question — YouTube goes through a completely different path (yt-dlp), not the HTTP engine. Let me check the actual media flow before answering, since some of my recent fixes may or may not apply to it.
+
+### 2026-06-07 10:37:25 — Claude
+Let me check how media downloads finalize (status, path) in the queue:
+
+### 2026-06-07 10:38:14 — Claude
+I've now traced the full YouTube path. Here's how it works — and an honest flag on where it intersects (badly) with the buttons I just added.
+
+## YouTube uses a totally separate engine
+
+YouTube/media downloads do **not** go through the HTTP segmented engine. They run **yt-dlp + ffmpeg** as external processes ([media_extractor.rs](src-tauri/src/media_extractor.rs)). So none of the HTTP fixes (Content-Length, segments) apply — and importantly, the 0%-progress bug doesn't affect media, because media uses a **percentage model** (`total_size = 100`, `downloaded` = percent parsed from yt-dlp's stdout).
+
+## Prerequisites (or it won't run)
+- **yt-dlp** and **ffmpeg** must be installed and either on your `PATH` or set in **Settings → External tools** (`ytdlp_path` / `ffmpeg_path`).
+- ffmpeg is required because YouTube serves video and audio as **separate streams** that must be merged. Without either binary you get *"Missing required binaries…"*.
+
+## The user flow
+1. **Media view** → paste a YouTube URL.
+2. `extract_media_info` runs `yt-dlp --dump-json` → returns title, thumbnail, duration, and a **format list** (1080p, 720p, audio-only, …).
+3. Pick a format → `start_media_download` enqueues it as a `Media` item.
+4. The queue scheduler dispatches it to yt-dlp (it counts against `max_concurrent` like any download); progress is parsed from `[download] 42% … ETA …` lines, throttled to 3/sec, and the bar fills normally.
+
+## Responsible-use guardrails (hard-blocked)
+DRM-bypass, `--cookies-from-browser`, and geo-bypass flags are **rejected before spawn** ([FORBIDDEN_FLAGS](src-tauri/src/media_extractor.rs#L57)). Cookies (for private/age-gated content you're entitled to) are passed only as a `Cookie:` header.
+
+## ⚠️ The gap with my recent work — it won't play nicely yet
+
+The download itself works, but the **filename and the new Open/Folder/Delete buttons will misbehave for YouTube**, because:
+
+1. **The filename is a yt-dlp *template***, `%(title)s.%(ext)s` ([lib.rs:260](src-tauri/src/lib.rs#L260)). The actual file is named after the video title (e.g. `My Video.mp4`), but the card shows the literal template string `%(title)s.%(ext)s`.
+2. **`output_path` is never set for media** ([queue.rs:773](src-tauri/src/queue.rs#L773) sets status/completed but not the path). So **Open file**, **Open folder**, and **Delete file** all fall back to `download_dir/%(title)s.%(ext)s` — which doesn't exist → "file not found".
+3. **The auto-categorizer skips media**, so media files aren't sorted and never get a path that way either.
+
+In short: a YouTube download will **download and show progress correctly**, but it'll display an ugly template name and the three new buttons won't find the file.
+
+## The fix I'd propose
+Capture the **real** output filename from yt-dlp (it prints `[download] Destination: <path>` and, for merged streams, `[Merger] Merging formats into "<path>"`), then set both `filename` and `output_path` on completion. That makes the name display correctly **and** makes Open/Folder/Delete work for YouTube exactly like HTTP downloads.
+
+Want me to implement that? It's contained to `media_extractor.rs` (return the final path from `download()`) and `queue.rs` (store it on completion) — fully compile-checkable here.
+
+### 2026-06-07 10:39:55 — You
+Yes and install necessary things
+
+### 2026-06-07 10:40:47 — Claude
+On it. Let me do this in two tracks: install yt-dlp + ffmpeg on your machine, and implement the filename/output-path capture. First let me check what's already installed and how the frontend starts a media download.
+
+### 2026-06-07 10:41:09 — Claude
+Neither yt-dlp nor ffmpeg is installed, but **winget is available**. Let me kick off both installs in the background while I write the code fix.
+
+### 2026-06-07 10:41:45 — Claude
+Let me read the media download button handler:
+
+### 2026-06-07 10:41:50 — Claude
+ffmpeg installed (exit 0). Let me read the rest of the media download handler and check the yt-dlp install:
+
+### 2026-06-07 10:42:13 — Claude
+Let me check the yt-dlp install output:
+
+### 2026-06-07 10:42:21 — Claude
+I used the Bash tool by mistake. Let me use PowerShell:
+
+### 2026-06-07 10:42:42 — Claude
+Both completed but aren't on the refreshed PATH yet. Let me check the yt-dlp task output and locate the actual binaries:
+
+### 2026-06-07 10:43:46 — Claude
+Both installed successfully (winget modified PATH — needs a shell/app restart to take effect). Let me get the exact binary paths, because there's a related code issue I need to fix:
+
+### 2026-06-07 10:45:37 — Claude
+Both work — **yt-dlp 2026.03.17** and **ffmpeg N-124716** are installed. winget updated PATH (takes effect after a shell/app restart). Now the code. There's a related bug I must fix: `check_availability` uses `fs::metadata` on the bare name `"yt-dlp"`, which doesn't search PATH — so the app would wrongly report it missing even when it's on PATH. Let me fix that plus the filename capture.
+
+First, make availability PATH-aware:
+
+### 2026-06-07 10:45:59 — Claude
+Now add the output-line parser and make `download()` return the final path:
+
+### 2026-06-07 10:46:15 — Claude
+Now update `download()` to track and return the final path:
+
+### 2026-06-07 10:46:33 — Claude
+Now update the queue's media-completion handler to store the real filename + path:
+
+### 2026-06-07 10:46:48 — Claude
+Now add unit tests for the new parser. Let me place them near the progress-parser tests:
+
+### 2026-06-07 10:46:58 — Claude
+Now compile-check and run tests:
+
+### 2026-06-07 10:47:20 — Claude
+Clippy clean. Let me run the lib tests (including the new parser tests):
+
+### 2026-06-07 10:49:29 — Claude
+All green — **189 lib tests pass** (5 new media-parser tests), clippy clean. Here's the complete picture.
+
+## ✅ Installed (winget)
+- **yt-dlp 2026.03.17** → `…\WinGet\Packages\yt-dlp.yt-dlp_…\yt-dlp.exe`
+- **ffmpeg N-124716** → `…\WinGet\Packages\yt-dlp.FFmpeg_…\ffmpeg-…-win64-gpl\bin\ffmpeg.exe`
+
+Both were added to PATH (**takes effect after you restart the app/shell**). Versions verified working.
+
+## ✅ Code fixes (3 things)
+
+**1. Real filename + path capture** ([media_extractor.rs](src-tauri/src/media_extractor.rs), [queue.rs](src-tauri/src/queue.rs))
+`download()` now parses yt-dlp's output lines — `[download] Destination:`, `[Merger] Merging formats into "…"`, `[ExtractAudio] Destination:`, and "already downloaded" — and returns the **actual** file path (the merged/post-processed one wins). On completion the queue sets the card's `filename` to the real name (e.g. `My Video.mp4`, not `%(title)s.%(ext)s`) and stores `output_path`. So **Open file / Open folder / Delete now work for YouTube** exactly like HTTP downloads.
+
+**2. PATH-aware availability check** — *the bug that would've blocked you even after installing.* `check_availability` previously did `fs::metadata("yt-dlp")`, which only checks the literal name in the working dir — so it reported "missing" even when yt-dlp was on PATH. Now a bare name is resolved against PATH (trying `.exe`/`.cmd`/`.bat` on Windows), matching how the process is actually spawned.
+
+**3. Tests** — 5 new unit tests for the output-path parser.
+
+## To use YouTube downloads
+1. **Fully restart** the app (close it, then `npm run tauri dev`) so it inherits the new PATH.
+2. **Media** view → paste a YouTube URL → **Extract** → pick a quality → **Download**.
+3. Progress fills via yt-dlp's percentage; on completion the card shows the real title-based filename and Open/Folder/Delete work.
+
+**If it still reports binaries missing** (e.g. PATH didn't propagate to the dev shell), paste these into **Settings → External tools** and Save:
+- yt-dlp: `C:\Users\Yash Verma\AppData\Local\Microsoft\WinGet\Packages\yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe\yt-dlp.exe`
+- ffmpeg: `C:\Users\Yash Verma\AppData\Local\Microsoft\WinGet\Packages\yt-dlp.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-N-124716-g054dffd133-win64-gpl\bin\ffmpeg.exe`
+
+Note: YouTube video+audio downloads merge into MP4/MKV via ffmpeg, so the card briefly shows `merging`/100% while ffmpeg runs, then flips to complete with the final name. Everything's still uncommitted — want me to commit this batch of media work?
+
+### 2026-06-07 10:55:35 — You
+I had to paste these links in settings, dormat is displaying various Quality but highest quality says VIdeo only why ? why no audio?
+
+### 2026-06-07 10:56:26 — Claude
+Great question — and this is the single most important thing to understand about YouTube downloads.
+
+## Why the highest quality is "video only"
+
+It's not a bug — it's how YouTube delivers high-resolution video. YouTube uses **DASH streaming**: above 720p (1080p, 1440p, 4K), it serves **video and audio as completely separate streams**. Only the lower "progressive" formats (usually 360p and 720p — formats 18/22) come with audio and video already muxed together.
+
+So yt-dlp correctly reports the 1080p+ streams as **video only** — to get a playable file you download the video-only stream **plus** a separate audio-only stream and merge them with ffmpeg (which is exactly why ffmpeg is required).
+
+Right now the app passes a single `format_id` to yt-dlp, so if you pick the 1080p "video only" entry, you get video with no sound. Let me fix that so picking a high-quality video automatically pulls in the best audio and merges them.
+
+Let me look at the exact frontend spots:
+
+### 2026-06-07 10:56:31 — Claude
+Let me see where `mediaCurrentUrl` is set so I can cache the formats alongside it:
+
+### 2026-06-07 10:56:39 — Claude
+Now I'll implement the fix: cache the formats, relabel video-only as "video + best audio (merged)", and compose the `+bestaudio` selector on download.
+
+### 2026-06-07 10:56:48 — Claude
+Now cache the formats and use the selector in the download handler:
+
+### 2026-06-07 10:57:33 — Claude
+Frontend-only fix (the backend already passes whatever selector it's given straight to yt-dlp's `-f`), so no recompile needed — it'll hot-reload.
+
+## What I changed ([main.js](src/main.js))
+
+1. **Auto-merge audio.** When you pick a video-only quality, the app now sends yt-dlp the selector `‹format›+bestaudio/‹format›` instead of just the video stream. yt-dlp downloads that video + the best audio track and merges them with ffmpeg into a single file with sound. The `/‹format›` fallback means it still works if an item genuinely has no separate audio.
+
+2. **Clearer labels.** Video-only entries no longer say the confusing "video only" — they now read **"1080p · mp4 · video + best audio (merged)"**, so it's obvious the result will have audio.
+
+3. Cached the format list (`mediaCurrentFormats`) so the download handler can look up the selected format's video/audio capabilities.
+
+## How it behaves now
+- Pick **1080p / 1440p / 4K** → app fetches that video stream **+ best audio**, ffmpeg merges → final file has sound (container is mp4 when the streams are mp4-compatible, otherwise mkv/webm — that's yt-dlp's choice).
+- Pick a **≤720p "video+audio"** entry → single progressive stream, no merge needed.
+- Pick **audio only** → just the audio track (e.g. for music).
+
+## Test
+The app should hot-reload the JS (no rebuild). In **Media**: extract a YouTube URL → the high-res options now say "video + best audio (merged)" → download one → it should briefly show `merging` (ffmpeg combining), then complete **with audio**.
+
+---
+
+Two side notes:
+- **You shouldn't have *needed* to paste the paths** — that's the `check_availability` PATH bug I fixed in the last batch, but it only takes effect once you do a full **Rust rebuild** (stop the app, `npm run tauri dev`). After that, binaries on PATH are detected automatically. Pasting the full paths is perfectly fine too and will keep working.
+- If you'd prefer simpler choices, I can replace the raw stream list with a few presets — **Best**, **1080p**, **720p**, **Audio only** — that map to yt-dlp selectors like `bestvideo[height<=1080]+bestaudio/best`. Want that? Otherwise this is ready (still uncommitted).
+
+### 2026-06-07 10:59:47 — You
+got this:
+
+### 2026-06-07 11:01:38 — Claude
+That error comes from the media engine, and it's a real bug I introduced in scope: **the merge step (ffmpeg combining the video + audio you just asked it to merge) takes longer than the 5-second grace window**, so the app kills yt-dlp mid-merge and reports failure.
+
+Let me look at the exact code:
+
+### 2026-06-07 11:01:47 — Claude
+That's the bug — `TERMINATE_GRACE` (5s) is meant as the *post-SIGTERM kill grace*, but here it's wrongly used as the deadline for **normal** completion. ffmpeg merging a 1080p+ video routinely needs more than 5s. Let me wait properly (honoring cancellation, but no artificial 5s cap):
+
+### 2026-06-07 11:02:12 — Claude
+`TERMINATE_GRACE` is still correctly used in `terminate_child` for the SIGTERM→SIGKILL path. The `[Merger]` line is printed *before* stdout closes, so the final filename is still captured. Let me compile-check and test:
+
+### 2026-06-07 11:03:53 — Claude
+Clippy clean, **189 tests pass**.
+
+## What went wrong
+The error `yt-dlp did not exit within 5s` was the app **killing yt-dlp in the middle of the ffmpeg merge**. When you pick a high-res quality, yt-dlp downloads the video stream + audio stream, then runs ffmpeg to merge them — and that merge takes more than 5 seconds for anything sizable.
+
+The 5s constant (`TERMINATE_GRACE`) was only ever meant as the grace period *after* a SIGTERM before force-killing. My media-completion code mistakenly reused it as the deadline for **normal** completion, so any merge longer than 5s got aborted → ERROR, 0%, and the filename stuck at the `%(title)s.%(ext)s` template (because yt-dlp never finished to report the real name).
+
+## The fix ([media_extractor.rs](src-tauri/src/media_extractor.rs))
+After yt-dlp's output stream closes, the app now **waits as long as the merge needs** (via a `select!` on the process exiting vs. your cancel button) instead of capping it at 5s. So:
+- Merges of any length complete normally.
+- **Cancel still works instantly** during a merge (it SIGTERMs/kills the tree and cleans up the partial file).
+- The `[Merger]` line is still parsed before stdout closes, so the real filename + path are captured for Open/Folder/Delete.
+
+## Test (this needs a Rust rebuild — stop the app, then `npm run tauri dev`)
+1. Media → extract a YouTube URL → pick a **1080p "video + best audio (merged)"** option → Download.
+2. It downloads, then shows ~100% while ffmpeg merges (a few seconds to a minute depending on length) — **no more "did not exit within 5s"**.
+3. On completion the card shows the real title-based filename, and the file plays **with audio**.
+
+One UX note: during the merge the card sits at its last percentage with no movement (yt-dlp emits no progress while ffmpeg runs). If you'd like, I can flip the status to **"merging"** when the `[Merger]` line appears so it's clearer what's happening — small addition. Want it? Otherwise this is ready (still uncommitted).
+
+### 2026-06-07 11:07:59 — You
+no file Video, nothing, repeated options.
+
+### 2026-06-07 11:09:16 — Claude
+Two separate problems here. The critical one — **COMPLETE but the filename is still the template and there's no file** — means yt-dlp's real output isn't being parsed (or the file isn't landing where expected). Rather than guess, let me reproduce the exact command the app runs and watch yt-dlp's actual output:
+
+### 2026-06-07 11:10:20 — Claude
+yt-dlp works perfectly from the CLI — it created `Me at the zoo.webm` (474 KB) and printed clean `Destination:`/`[Merger]` lines my parser should catch. So the problem is in the app, not yt-dlp. Two things stand out: the merged file is **`.webm`** (not mp4), and I need to find whether the app is creating a file at all. Let me check your Downloads folder and the queue's emit logic:
+
+### 2026-06-07 11:12:04 — Claude
+**Found it — the file IS being created.** There's a `Generate Any Image Locally on PC….webm` (54 MB) sitting in your Downloads, created at 16:29. So "no file" is actually three real problems stacked together:
+
+1. **The card shows the template name** (`%(title)s.%(ext)s`) instead of the real title → you couldn't tell what/where the file is. This is because **the app you're running is the *old* build** — it's been holding `downpour.exe` the whole session (that's why my test builds hit "file locked"). The filename-capture + 5s-merge fixes are compiled but **not running yet**. A clean rebuild fixes this.
+2. **It's `.webm`, not `.mp4`** — `bestaudio` grabbed an Opus/webm audio track, so the merge container became webm (harder to play on Windows).
+3. **Duplicate format options** — yt-dlp returns the same quality from multiple internal clients.
+
+Let me fix #2 and #3 in code, then you rebuild to get all of it. First, force mp4 output for merges:
+
+### 2026-06-07 11:12:30 — Claude
+Now the frontend: prefer AAC (m4a) audio so the mp4 merge is universally playable, and dedupe the format list:
+
+### 2026-06-07 11:12:51 — Claude
+Let me verify the mp4 fix actually produces an mp4 (not webm), and compile-check the Rust change:
+
+### 2026-06-07 11:13:23 — Claude
+Verified end-to-end: with the new args, yt-dlp now merges into **`Me at the zoo.mp4`** (not webm), and the `[Merger] … .mp4` line is exactly what my parser captures as the filename. Clippy clean. Let me run the tests:
+
+### 2026-06-07 11:14:23 — Claude
+All verified, 189 tests pass. Here's the full situation.
+
+## The "no file" was a false alarm — and the root cause
+Your file **is** there: `Generate Any Image Locally on PC….webm` (54 MB) in your Downloads folder. The real problem is **you're still running the old build**. The app has held `downpour.exe` open this entire session (that's why my builds kept hitting "file locked"), so none of the media fixes I wrote are actually running yet — which is exactly why you see the raw `%(title)s.%(ext)s` template name and got "did not exit within 5s".
+
+## 🔑 You must fully restart to rebuild
+Close the Downpour window **completely** (check it's not still in the tray — right-click tray → Quit), then `npm run tauri dev`. That recompiles with **all** the media fixes from this session:
+- Real filename + path capture (card shows the title, Open/Folder/Delete work)
+- 5s merge-kill → cancellable wait (no more "did not exit within 5s")
+- PATH-aware binary detection
+- **mp4 output** (new)
+- **deduped format list** (new)
+
+## What I just fixed and verified by running yt-dlp directly
+
+**1. WebM → MP4.** Added `--merge-output-format mp4` and made the selector prefer AAC audio (`bestaudio[ext=m4a]`). I ran the exact new command — it now produces **`Me at the zoo.mp4`** instead of webm, and the `[Merger] … .mp4` line is precisely what the app parses for the filename.
+
+**2. Duplicate formats.** `dedupeFormats()` collapses the repeated "1080p · mp4 · video+audio" entries (yt-dlp returns the same quality from several internal clients) down to one per quality/ext/kind.
+
+## After you rebuild, test
+1. Media → extract a YouTube URL → the list should be **much shorter** (no duplicates).
+2. Pick **1080p** → Download → it downloads video+audio, merges to **mp4**, and the card shows the **real video title** at COMPLETE.
+3. **↗ Open** plays it (with audio); **📂** reveals it in Downloads.
+
+One cosmetic note I flagged earlier still stands: during the ffmpeg merge the bar sits at its last % with no movement. Want me to flip the status to **"merging"** when the `[Merger]` line appears so it's obvious it's working? Otherwise this batch is done (still uncommitted — quite a lot has piled up now; say the word and I'll commit it all with a clear message).
+
+### 2026-06-07 13:23:51 — You
+The file gets downlaoded and save and also with audio but the problem is the name on the download manage is still %(title)s.%(ext)s and it shows 100 B instead of actual file size and when i click on open file or folder i am getting this : 
+Action failed: file not found: C:\Users\Yash Verma\Downloads\%(title)s.%(ext)s but the file exists in the folder with its actual name.  FUrtehr WHen I am downloaded pdf from email it is being daved as download.bin . Further when i am opening the folder to see file, it opens the DIR:  Documents instead of C:\Users\Yash Verma\Downloads\Documents. FUrther Icons like 📄 and ⚙️  and others are being used instead of our style icons.
+
+### 2026-06-07 13:26:34 — Claude
+This is several distinct bugs. The biggest realization first: **the media name/size and Open-path issues mean your running app is still the old Rust binary** — the frontend hot-reloads (so you get audio/dedupe), but the Rust changes (filename capture, real path) aren't active because the app keeps `downpour.exe` locked. But you've also surfaced **genuinely new bugs** I need to fix: `download.bin` for PDFs, the `explorer /select` opening the wrong folder, media showing `100 B`, and the emoji icons.
+
+Let me fix all of them. Let me read the relevant spots first.
+
+### 2026-06-07 13:26:55 — Claude
+Let me add a Content-Disposition filename parser. First, the helper near `filename_from_url`:
+
+### 2026-06-07 13:27:24 — Claude
+Now use it in `download_core` to override the filename when the server provides one:
+
+### 2026-06-07 13:27:50 — Claude
+Now fix the media `100 B` size — stat the real file on completion. Let me read the current media-completion block:
+
+### 2026-06-07 13:28:35 — Claude
+Now fix the `explorer /select` reveal — the space in "Yash Verma" breaks the default arg quoting, so Explorer opens the wrong place. Use Windows `raw_arg` with an explicitly-quoted path:
+
+### 2026-06-07 13:29:07 — Claude
+Now let me compile-check the backend changes before doing the icons:
+
+### 2026-06-07 13:29:21 — Claude
+Backend clean. Let me add a quick test for the Content-Disposition parser, then do the icons. Let me find the downloader test module:
+
+### 2026-06-07 13:29:53 — Claude
+Backend has the Content-Disposition tests. Now the icons — let me find the icon maps to replace emoji with themed SVGs:
+
+### 2026-06-07 13:30:31 — Claude
+I'll replace the emoji with monochrome line-SVG icons that inherit `currentColor`. Let me check the icon container styles first:
+
+### 2026-06-07 13:30:52 — Claude
+Now I'll replace the emoji icon system with themed SVGs:
+
+### 2026-06-07 13:31:07 — Claude
+Now replace the hardcoded `🎬` in the media-row renderer, and update the icon-container CSS to size the SVG:
+
+### 2026-06-07 13:31:17 — Claude
+Now format, lint, and run tests:
+
+### 2026-06-07 13:32:19 — Claude
+All green — **193 tests pass** (4 new Content-Disposition tests), clippy clean. Let me confirm my suspicion about why your rebuilds aren't taking effect:
+
+### 2026-06-07 13:40:16 — Claude
+Diagnosis confirmed — and good news: **no Downpour process is running now, and `downpour.exe` was just relinked at 16:43** by my compile, so the on-disk binary is finally current with all fixes. The reason your earlier rebuilds silently kept the old binary: **minimize-to-tray was likely on, so closing the window left the app alive in the tray holding `downpour.exe`** — which blocks the relink. Quitting it (or my build forcing it) freed the lock.
+
+## Everything fixed in this batch (193 tests pass, clippy clean)
+
+| Issue | Fix |
+|---|---|
+| **PDF from email saved as `download.bin`** | The engine now reads the server's **`Content-Disposition`** header (`filename=` and the RFC-5987 `filename*=` form with percent-decoding) and uses that real name. [downloader.rs](src-tauri/src/downloader.rs) + 4 tests. |
+| **Media shows `100 B`** | On completion the queue now **stats the real file** and shows its actual byte size instead of the `100` percent-placeholder. [queue.rs](src-tauri/src/queue.rs) |
+| **Card stuck at `%(title)s.%(ext)s` + Open fails** | Already fixed (filename/path captured from yt-dlp's `[Merger]` line — verified by running yt-dlp directly). It just needs the new binary running. |
+| **Open folder opens "Documents" not Downloads\Documents** | `explorer /select,` broke on the space in "Yash Verma". Now uses Windows `raw_arg` with the path explicitly quoted. [lib.rs](src-tauri/src/lib.rs) |
+| **Emoji icons (📄 ⚙️ 🎬…)** | Replaced with **monochrome line-SVG icons** (video/audio/image/document/archive/app/disc/package/generic) that inherit the theme color. [main.js](src/main.js) + [styles.css](src/styles.css) |
+| (earlier) WebM, duplicate formats | `--merge-output-format mp4` + AAC audio; deduped format list. |
+
+## 🔑 To actually get all of this — relaunch cleanly
+Since the app isn't running now, just start it fresh:
+```
+npm run tauri dev
+```
+**During development, quit Downpour from the tray** (right-click tray → Quit), *not* just the window — with minimize-to-tray on, the window's ✕ leaves it running in the tray, which locks `downpour.exe` and silently blocks every Rust rebuild. That's why your last few "rebuilds" only picked up frontend changes.
+
+## Then verify
+1. **Email PDF** → downloads with its real name (e.g. `statement.pdf`), not `download.bin`.
+2. **YouTube** → real title filename, real **MB** size, plays with audio, **↗ Open** works, **📂** reveals it in `Downloads\<Category>` with the file selected.
+3. **Icons** → clean line icons matching the UI, no emoji.
+
+This is a big pile of uncommitted work now (media, settings, tray, open/delete, icons, filename handling). Want me to commit it all in a few logical commits with clear messages?
+
+### 2026-06-07 13:42:24 — You
+WHat comment to be used when i commit myself?
+
+### 2026-06-07 13:42:31 — Claude
+Let me check exactly what's staged/changed so the message matches reality.
+
+### 2026-06-07 13:42:50 — You
+[Request interrupted by user]
+
+### 2026-06-07 13:42:57 — You
+just provide the comment please
+
+### 2026-06-07 13:43:04 — Claude
+```
+feat: download dir wiring, resume-on-startup, tray, media merge, file actions
+
+- Wire AppSettings.download_dir through QueueManager into the engine
+- Add resume_on_startup setting (auto-resume after restore)
+- Add system tray (show/hide/quit) + minimize-to-tray + completion notifications
+- Capture real filename/path + size for HTTP (Content-Disposition) and yt-dlp media
+- YouTube: auto-merge video+audio to mp4, dedupe formats, PATH-aware binary check
+- Fix scheduler suspend blocking new/captured downloads; graceful pause of queued items
+- Add Open file / Open folder / Delete file / Remove actions (+ delete confirm setting)
+- Replace emoji icons with themed monochrome SVGs
+- Docs: ARCHITECTURE.md, GEMINI.md, working-memory updates
+```

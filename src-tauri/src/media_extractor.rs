@@ -268,6 +268,55 @@ pub fn parse_progress_line(line: &str) -> Option<MediaProgress> {
     })
 }
 
+/// A filesystem path yt-dlp announced for the output file, classified by how
+/// authoritative it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutputLine {
+    /// A per-stream or single-file destination (`[download] Destination: …`).
+    Destination(String),
+    /// The definitive merged / post-processed output, which supersedes any
+    /// per-stream destination (`[Merger] Merging formats into …` or
+    /// `[ExtractAudio] Destination: …`).
+    Final(String),
+}
+
+/// Parse a yt-dlp stdout line that announces the output file path, if any.
+///
+/// Recognizes the destination, merge, and "already downloaded" lines so callers
+/// can learn the real on-disk filename (yt-dlp names files from an output
+/// template like `%(title)s.%(ext)s`, so the final name isn't known up front).
+pub fn parse_output_line(line: &str) -> Option<OutputLine> {
+    let line = line.trim();
+
+    if let Some(rest) = line.strip_prefix("[Merger] Merging formats into ") {
+        let path = rest.trim().trim_matches('"');
+        if !path.is_empty() {
+            return Some(OutputLine::Final(path.to_string()));
+        }
+    }
+    if let Some(rest) = line.strip_prefix("[ExtractAudio] Destination: ") {
+        let path = rest.trim();
+        if !path.is_empty() {
+            return Some(OutputLine::Final(path.to_string()));
+        }
+    }
+    if let Some(rest) = line.strip_prefix("[download] Destination: ") {
+        let path = rest.trim();
+        if !path.is_empty() {
+            return Some(OutputLine::Destination(path.to_string()));
+        }
+    }
+    if let Some(rest) = line.strip_prefix("[download] ") {
+        if let Some(path) = rest.strip_suffix(" has already been downloaded") {
+            let path = path.trim();
+            if !path.is_empty() {
+                return Some(OutputLine::Destination(path.to_string()));
+            }
+        }
+    }
+    None
+}
+
 /// Map a yt-dlp format JSON object into a [`MediaFormat`].
 fn format_from_json(v: &serde_json::Value) -> Option<MediaFormat> {
     let format_id = v.get("format_id")?.as_str()?.to_string();
@@ -389,12 +438,15 @@ impl MediaExtractor {
         }
     }
 
-    /// Verify that both yt-dlp and ffmpeg binaries exist at the configured paths
-    /// (Requirement 8.5).
+    /// Verify that both yt-dlp and ffmpeg binaries are available (Requirement 8.5).
+    ///
+    /// An explicit path is checked directly; a bare command name (e.g. `yt-dlp`)
+    /// is resolved against `PATH`, mirroring how the process is actually spawned
+    /// — so binaries installed on `PATH` are detected without a configured path.
     pub async fn check_availability(&self) -> ExtractorStatus {
         ExtractorStatus {
-            ytdlp_available: tokio::fs::metadata(&self.ytdlp_path).await.is_ok(),
-            ffmpeg_available: tokio::fs::metadata(&self.ffmpeg_path).await.is_ok(),
+            ytdlp_available: binary_available(&self.ytdlp_path),
+            ffmpeg_available: binary_available(&self.ffmpeg_path),
         }
     }
 
@@ -433,6 +485,11 @@ impl MediaExtractor {
             output_path.to_string_lossy().into_owned(),
             "--no-playlist".into(),
             "--newline".into(),
+            // When a separate video + audio stream are merged, prefer an MP4
+            // container so the result is broadly playable (e.g. on Windows)
+            // rather than the WebM yt-dlp would otherwise pick for Opus audio.
+            "--merge-output-format".into(),
+            "mp4".into(),
             "--ffmpeg-location".into(),
             self.ffmpeg_path.to_string_lossy().into_owned(),
         ];
@@ -514,6 +571,8 @@ impl MediaExtractor {
     /// force-killed after a 5s grace period, and partial files are removed
     /// (Requirement 8.8). On a non-zero exit the last 5 stderr lines are
     /// reported and partial files are cleaned up (Requirement 8.7).
+    /// Returns the final on-disk path yt-dlp wrote (parsed from its output), or
+    /// `None` if it could not be determined.
     pub async fn download(
         &self,
         url: &str,
@@ -521,7 +580,7 @@ impl MediaExtractor {
         output_path: &Path,
         progress_tx: Sender<MediaProgress>,
         cancel: CancellationToken,
-    ) -> Result<()> {
+    ) -> Result<Option<PathBuf>> {
         let status = self.check_availability().await;
         if let Some(err) = status.missing_binary_error() {
             return Err(anyhow!(err));
@@ -553,9 +612,13 @@ impl MediaExtractor {
             }
         });
 
-        // Read stdout progress lines, throttling forwarded events to 3/sec.
+        // Read stdout progress lines, throttling forwarded events to 3/sec, and
+        // track the output path yt-dlp announces so the caller learns the real
+        // filename (a `[Merger]`/`[ExtractAudio]` line supersedes `Destination`).
         let mut lines = BufReader::new(stdout).lines();
         let mut last_emit: Option<Instant> = None;
+        let mut destination: Option<String> = None;
+        let mut final_output: Option<String> = None;
 
         loop {
             tokio::select! {
@@ -578,6 +641,11 @@ impl MediaExtractor {
                                     // A closed receiver should not abort the download.
                                     let _ = progress_tx.send(progress).await;
                                 }
+                            } else if let Some(out) = parse_output_line(&line) {
+                                match out {
+                                    OutputLine::Final(p) => final_output = Some(p),
+                                    OutputLine::Destination(p) => destination = Some(p),
+                                }
                             }
                         }
                         Ok(None) => break, // EOF: process closed stdout
@@ -587,17 +655,19 @@ impl MediaExtractor {
             }
         }
 
-        // Bound the wait for exit so no orphan child remains (Requirements 8.4, 8.8).
-        let exit = match tokio::time::timeout(TERMINATE_GRACE, child.wait()).await {
-            Ok(res) => res.context("failed waiting for yt-dlp to exit")?,
-            Err(_) => {
+        // Wait for yt-dlp to finish. After stdout closes it may still be
+        // post-processing — e.g. ffmpeg merging the chosen video stream with the
+        // best audio — which routinely takes far longer than the SIGTERM
+        // kill-grace. Wait without that tight bound while still honouring
+        // cancellation, so a merge is never killed mid-flight (Requirements 8.4, 8.8).
+        let exit = tokio::select! {
+            _ = cancel.cancelled() => {
                 terminate_child(&mut child).await;
+                stderr_task.abort();
                 cleanup_partial(output_path).await;
-                return Err(anyhow!(
-                    "yt-dlp did not exit within {}s",
-                    TERMINATE_GRACE.as_secs()
-                ));
+                return Err(anyhow!("media download cancelled"));
             }
+            res = child.wait() => res.context("failed waiting for yt-dlp to exit")?,
         };
 
         let _ = stderr_task.await;
@@ -611,7 +681,8 @@ impl MediaExtractor {
             return Err(anyhow!("yt-dlp exited with {}: {}", exit, tail));
         }
 
-        Ok(())
+        // The merged/post-processed path wins over a per-stream destination.
+        Ok(final_output.or(destination).map(PathBuf::from))
     }
 
     /// Spawn yt-dlp with piped stdio. On Unix the child is placed in its own
@@ -692,6 +763,39 @@ async fn terminate_child(child: &mut Child) {
     }
 }
 
+/// Whether an external binary can be found: at an explicit path, or — for a bare
+/// command name — somewhere on `PATH` (trying Windows executable extensions).
+/// Mirrors `std::process::Command`'s program resolution so the availability
+/// check agrees with what spawning will actually do.
+fn binary_available(program: &Path) -> bool {
+    // An explicit path (absolute or containing a directory component) is checked
+    // directly; only a bare name is resolved against PATH.
+    let is_bare = program
+        .parent()
+        .map(|p| p.as_os_str().is_empty())
+        .unwrap_or(true);
+    if !is_bare {
+        return program.is_file();
+    }
+
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let name = program.to_string_lossy();
+    for dir in std::env::split_paths(&paths) {
+        if dir.join(&*name).is_file() {
+            return true;
+        }
+        #[cfg(windows)]
+        for ext in ["exe", "cmd", "bat"] {
+            if dir.join(format!("{name}.{ext}")).is_file() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Return the last `n` non-empty lines of `text`, joined by newlines.
 fn last_lines(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -750,6 +854,51 @@ mod tests {
     fn ignores_download_destination_line() {
         // A "[download] Destination: ..." line has no percentage and must not parse.
         assert!(parse_progress_line("[download] Destination: video.mp4").is_none());
+    }
+
+    // ── Output-path parser unit tests ────────────────────────────────────────
+
+    #[test]
+    fn parses_download_destination_path() {
+        assert_eq!(
+            parse_output_line("[download] Destination: C:\\dl\\My Video.f137.mp4"),
+            Some(OutputLine::Destination(
+                "C:\\dl\\My Video.f137.mp4".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn merger_path_is_final_and_unquoted() {
+        assert_eq!(
+            parse_output_line("[Merger] Merging formats into \"/dl/My Video.mp4\""),
+            Some(OutputLine::Final("/dl/My Video.mp4".to_string()))
+        );
+    }
+
+    #[test]
+    fn extract_audio_destination_is_final() {
+        assert_eq!(
+            parse_output_line("[ExtractAudio] Destination: /dl/Song.mp3"),
+            Some(OutputLine::Final("/dl/Song.mp3".to_string()))
+        );
+    }
+
+    #[test]
+    fn already_downloaded_line_yields_destination() {
+        assert_eq!(
+            parse_output_line("[download] /dl/My Video.mp4 has already been downloaded"),
+            Some(OutputLine::Destination("/dl/My Video.mp4".to_string()))
+        );
+    }
+
+    #[test]
+    fn non_output_lines_yield_none() {
+        assert!(
+            parse_output_line("[download]  42.0% of 10.00MiB at 1.00MiB/s ETA 00:05").is_none()
+        );
+        assert!(parse_output_line("[info] Writing video metadata").is_none());
+        assert!(parse_output_line("").is_none());
     }
 
     #[test]

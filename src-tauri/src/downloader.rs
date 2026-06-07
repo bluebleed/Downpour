@@ -218,7 +218,73 @@ pub fn filename_from_url(url: &str) -> String {
     sanitize_filename(raw)
 }
 
-/// Where files are saved. TODO: make this user-configurable via AppSettings.
+/// Decode `%XX` percent-escapes in a string (UTF-8 bytes), leaving other
+/// characters untouched. Used for RFC 5987 `filename*` values.
+fn percent_decode(s: &str) -> String {
+    let hex = |b: u8| -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
+        }
+    };
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push(h * 16 + l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Extract a download filename from a `Content-Disposition` header value, if any.
+///
+/// Handles the common `filename="name.pdf"` form and the RFC 5987
+/// `filename*=UTF-8''name%20with%20spaces.pdf` extended form (preferred when
+/// present, as it carries non-ASCII names). Returns a sanitized filename, or
+/// `None` when no usable name is present.
+pub fn filename_from_content_disposition(value: &str) -> Option<String> {
+    // Prefer the RFC 5987 extended form (charset'lang'percent-encoded).
+    for part in value.split(';') {
+        let part = part.trim();
+        if let Some(rest) = part
+            .strip_prefix("filename*=")
+            .or(part.strip_prefix("filename* ="))
+        {
+            let rest = rest.trim().trim_matches('"');
+            let encoded = rest.rsplit("''").next().unwrap_or(rest);
+            let name = sanitize_filename(&percent_decode(encoded));
+            if name != "download.bin" {
+                return Some(name);
+            }
+        }
+    }
+    // Fall back to the plain `filename=` form.
+    for part in value.split(';') {
+        let part = part.trim();
+        if let Some(rest) = part.strip_prefix("filename=") {
+            let raw = rest.trim().trim_matches('"').trim();
+            if !raw.is_empty() {
+                return Some(sanitize_filename(raw));
+            }
+        }
+    }
+    None
+}
+
+/// Default download directory: the OS downloads folder, or the temp dir if it
+/// cannot be resolved. The configured `AppSettings.download_dir` overrides this
+/// at runtime — it is threaded into the download functions as `dest_dir` and
+/// only this fallback remains for callers without a configured directory.
 pub fn downloads_dir() -> PathBuf {
     dirs::download_dir().unwrap_or_else(std::env::temp_dir)
 }
@@ -396,6 +462,7 @@ fn build_request(
 /// Registers the cancellation token in `cancel_tokens` (so [`pause_download`]
 /// can find it) and removes it when finished. The actual work is delegated to
 /// [`download_core`].
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     app: AppHandle,
     downloads: Downloads,
@@ -403,13 +470,14 @@ pub async fn run(
     limiter: SpeedLimiter,
     cancel_token: CancellationToken,
     cancel_tokens: CancelTokens,
+    dest_dir: PathBuf,
 ) -> Result<DownloadOutcome> {
     cancel_tokens
         .lock()
         .await
         .insert(id.clone(), cancel_token.clone());
 
-    let result = download_core(&app, &downloads, &id, &limiter, &cancel_token).await;
+    let result = download_core(&app, &downloads, &id, &limiter, &cancel_token, &dest_dir).await;
 
     cancel_tokens.lock().await.remove(&id);
     result
@@ -423,6 +491,7 @@ async fn download_core(
     id: &str,
     limiter: &SpeedLimiter,
     cancel_token: &CancellationToken,
+    dest_dir: &Path,
 ) -> Result<DownloadOutcome> {
     let (url, item_snapshot) = {
         let map = downloads.lock().await;
@@ -437,13 +506,28 @@ async fn download_core(
         .timeout(Duration::from_secs(10));
 
     let head = head_req.send().await?;
-    let total = head.content_length().unwrap_or(0);
+    // Prefer the HEAD Content-Length; if the server omits it, keep any size the
+    // browser extension captured rather than clobbering it to 0.
+    let total = match head.content_length() {
+        Some(len) if len > 0 => len,
+        _ => item_snapshot.total_size,
+    };
     let supports_range = head
         .headers()
         .get(reqwest::header::ACCEPT_RANGES)
         .and_then(|v| v.to_str().ok())
         .map(|v| v.eq_ignore_ascii_case("bytes"))
         .unwrap_or(false);
+
+    // Prefer a server-advertised filename (Content-Disposition) over the
+    // URL-derived one — this is what gives real names to email attachments and
+    // dynamic links that would otherwise fall back to "download.bin".
+    let filename = head
+        .headers()
+        .get(reqwest::header::CONTENT_DISPOSITION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(filename_from_content_disposition)
+        .unwrap_or_else(|| item_snapshot.filename.clone());
 
     let num_segments = item_snapshot.segment_count.clamp(1, 32);
 
@@ -456,11 +540,12 @@ async fn download_core(
             it.total_size = total;
             it.status = DownloadStatus::Downloading;
             it.is_resumable = supports_range;
+            it.filename = filename.clone();
         }
     }
     emit(app, downloads, id).await;
 
-    let dest = downloads_dir().join(&item_snapshot.filename);
+    let dest = dest_dir.join(&filename);
 
     if use_segments {
         // Compute segments and store them on the item.
@@ -526,6 +611,24 @@ async fn single_stream(
     let resp = tokio::time::timeout(REQUEST_TIMEOUT, get_req.send())
         .await
         .map_err(|_| anyhow!("no response within {}s", REQUEST_TIMEOUT.as_secs()))??;
+
+    // Many servers omit Content-Length on HEAD but include it on the GET response.
+    // Fall back to the GET size so the UI can show real progress (% + ETA) and we
+    // can verify the final size. `total == 0` means the size was unknown.
+    let total = if total == 0 {
+        resp.content_length().unwrap_or(0)
+    } else {
+        total
+    };
+    if total > 0 {
+        let mut map = downloads.lock().await;
+        if let Some(it) = map.get_mut(id) {
+            it.total_size = total;
+        }
+        drop(map);
+        emit(app, downloads, id).await;
+    }
+
     let mut file = tokio::fs::File::create(dest).await?;
     let mut stream = resp.bytes_stream();
     let mut downloaded: u64 = 0;
@@ -603,7 +706,7 @@ async fn single_stream(
         }
     }
 
-    mark_complete(app, downloads, id, total).await;
+    mark_complete(app, downloads, id, total, dest).await;
     Ok(DownloadOutcome::Completed)
 }
 
@@ -725,7 +828,7 @@ async fn run_segments(
         return Err(anyhow!("file size mismatch"));
     }
 
-    mark_complete(app, downloads, id, total).await;
+    mark_complete(app, downloads, id, total, dest).await;
     Ok(DownloadOutcome::Completed)
 }
 
@@ -800,11 +903,19 @@ async fn mark_size_mismatch(
 }
 
 /// Mark a download as complete and emit.
-async fn mark_complete(app: &AppHandle, downloads: &Downloads, id: &str, total: u64) {
+async fn mark_complete(app: &AppHandle, downloads: &Downloads, id: &str, total: u64, dest: &Path) {
     {
         let mut map = downloads.lock().await;
         if let Some(it) = map.get_mut(id) {
             it.downloaded = total.max(it.downloaded);
+            // If the size was never known (HEAD + GET both omitted Content-Length),
+            // adopt the bytes actually written so the UI shows 100% on completion.
+            if it.total_size == 0 {
+                it.total_size = it.downloaded;
+            }
+            // Record where the file landed so the UI can open it / reveal it. The
+            // auto-categorizer overwrites this if it later moves the file.
+            it.output_path = Some(dest.to_path_buf());
             it.status = DownloadStatus::Complete;
             it.speed = 0;
             it.eta = Some(0);
@@ -920,13 +1031,23 @@ pub async fn resume_download(
     cancel_token: CancellationToken,
     cancel_tokens: CancelTokens,
     persistence: PersistenceLayer,
+    dest_dir: PathBuf,
 ) -> Result<DownloadOutcome> {
     cancel_tokens
         .lock()
         .await
         .insert(id.clone(), cancel_token.clone());
 
-    let result = resume_core(&app, &downloads, &id, paused_state, &limiter, &cancel_token).await;
+    let result = resume_core(
+        &app,
+        &downloads,
+        &id,
+        paused_state,
+        &limiter,
+        &cancel_token,
+        &dest_dir,
+    )
+    .await;
 
     // Persist whatever final state we reached (complete, paused, or unchanged).
     {
@@ -942,6 +1063,7 @@ pub async fn resume_download(
 }
 
 /// The core resume logic (no token-registry management).
+#[allow(clippy::too_many_arguments)]
 async fn resume_core(
     app: &AppHandle,
     downloads: &Downloads,
@@ -949,6 +1071,7 @@ async fn resume_core(
     paused_state: PausedState,
     limiter: &SpeedLimiter,
     cancel_token: &CancellationToken,
+    dest_dir: &Path,
 ) -> Result<DownloadOutcome> {
     let (url, item_snapshot, original_total_size) = {
         let map = downloads.lock().await;
@@ -958,7 +1081,7 @@ async fn resume_core(
         (it.url.clone(), it.clone(), it.total_size)
     };
 
-    let dest = downloads_dir().join(&item_snapshot.filename);
+    let dest = dest_dir.join(&item_snapshot.filename);
 
     // If we never learned the size, we cannot verify or seek reliably — just
     // restart from scratch.
@@ -973,7 +1096,7 @@ async fn resume_core(
             "Restarting download (size unknown)",
         )
         .await;
-        return download_core(app, downloads, id, limiter, cancel_token).await;
+        return download_core(app, downloads, id, limiter, cancel_token, dest_dir).await;
     }
 
     let client = reqwest::Client::builder().build()?;
@@ -1012,7 +1135,7 @@ async fn resume_core(
                 "File changed on server, restarting download",
             )
             .await;
-            return download_core(app, downloads, id, limiter, cancel_token).await;
+            return download_core(app, downloads, id, limiter, cancel_token, dest_dir).await;
         }
         ResumeAction::RestartRangeUnsupported => {
             let _ = tokio::fs::remove_file(&dest).await;
@@ -1025,7 +1148,7 @@ async fn resume_core(
                 "Server no longer supports Range, restarting download",
             )
             .await;
-            return download_core(app, downloads, id, limiter, cancel_token).await;
+            return download_core(app, downloads, id, limiter, cancel_token, dest_dir).await;
         }
         ResumeAction::RestartPartialFileMissing => {
             let _ = tokio::fs::remove_file(&dest).await;
@@ -1038,7 +1161,7 @@ async fn resume_core(
                 "Partial data lost, restarting download",
             )
             .await;
-            return download_core(app, downloads, id, limiter, cancel_token).await;
+            return download_core(app, downloads, id, limiter, cancel_token, dest_dir).await;
         }
         ResumeAction::Resume => {}
     }
@@ -1425,6 +1548,45 @@ mod tests {
     #[test]
     fn test_filename_from_url_empty_path() {
         assert_eq!(filename_from_url("https://example.com/"), "download.bin");
+    }
+
+    #[test]
+    fn content_disposition_plain_filename() {
+        assert_eq!(
+            filename_from_content_disposition("attachment; filename=\"report.pdf\""),
+            Some("report.pdf".to_string())
+        );
+        assert_eq!(
+            filename_from_content_disposition("attachment; filename=invoice.pdf"),
+            Some("invoice.pdf".to_string())
+        );
+    }
+
+    #[test]
+    fn content_disposition_extended_filename_is_percent_decoded() {
+        assert_eq!(
+            filename_from_content_disposition(
+                "attachment; filename*=UTF-8''My%20Statement%20Q1.pdf"
+            ),
+            Some("My Statement Q1.pdf".to_string())
+        );
+    }
+
+    #[test]
+    fn content_disposition_prefers_extended_over_plain() {
+        // The ASCII fallback name and the extended (non-ASCII) name both present.
+        assert_eq!(
+            filename_from_content_disposition(
+                "attachment; filename=\"fallback.pdf\"; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf"
+            ),
+            Some("résumé.pdf".to_string())
+        );
+    }
+
+    #[test]
+    fn content_disposition_none_when_absent() {
+        assert!(filename_from_content_disposition("inline").is_none());
+        assert!(filename_from_content_disposition("attachment").is_none());
     }
 
     #[test]

@@ -399,6 +399,31 @@ h2 {
   transform: scale(0.97);
 }
 
+/* Destructive primary action (e.g. delete confirmation) */
+.btn-danger {
+  background: var(--status-error);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  padding: 10px 20px;
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  box-shadow: 0 0 12px var(--status-error-glow);
+  transition: all 0.15s ease;
+}
+
+.btn-danger:hover {
+  background: #fa8a8a;
+  box-shadow: 0 0 20px var(--status-error-glow);
+  transform: translateY(-1px);
+}
+
+.btn-danger:active {
+  transform: scale(0.97);
+}
+
 /* Inputs */
 .input {
   background: rgba(10, 12, 16, 0.6);
@@ -487,10 +512,22 @@ h2 {
   animation: slideUp 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.modal--sm {
+  width: min(400px, 90vw);
+}
+
 .modal__title {
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   margin-bottom: 16px;
+}
+
+.modal__message {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  margin-bottom: 20px;
+  word-break: break-word;
 }
 
 .modal__form {
@@ -635,6 +672,13 @@ h2 {
   line-height: 1;
   width: 28px;
   text-align: center;
+  color: var(--accent-text);
+}
+
+.file-icon {
+  width: 22px;
+  height: 22px;
+  vertical-align: middle;
 }
 
 .download-card__filename {
@@ -675,6 +719,10 @@ h2 {
   font-size: var(--text-base);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-icon svg {
+  display: block;
 }
 
 .btn-icon:hover {
@@ -778,6 +826,14 @@ h2 {
 
 .download-card__meta-spacer {
   flex: 1;
+}
+
+.download-card__date {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .download-card__error {

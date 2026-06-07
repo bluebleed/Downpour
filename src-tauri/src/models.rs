@@ -3,6 +3,7 @@
 //! All types use `#[serde(rename_all = "camelCase")]` for frontend (JS) compatibility.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -123,6 +124,11 @@ pub struct DownloadItem {
     /// through the queue so the scheduler can dispatch to the media extractor.
     #[serde(default)]
     pub media_format_id: Option<String>,
+    /// Final path of the downloaded file on disk, set on completion (and updated
+    /// if the auto-categorizer moves it). Lets the UI open the file or reveal it
+    /// in its folder. `None` until the download completes.
+    #[serde(default)]
+    pub output_path: Option<PathBuf>,
 }
 
 impl DownloadItem {
@@ -154,6 +160,7 @@ impl DownloadItem {
             download_type: DownloadType::Http,
             segment_count: 4,
             media_format_id: None,
+            output_path: None,
         }
     }
 }
@@ -214,6 +221,17 @@ pub struct QueueConfig {
     pub auto_start: bool,
     /// Global speed limit in bytes/sec; 0 means unlimited.
     pub speed_limit_global: u64,
+    /// Directory where downloaded files are saved. Seeded from
+    /// `AppSettings.download_dir`; the queue tracks live updates via
+    /// `QueueManager::set_download_dir`.
+    #[serde(default = "default_download_dir")]
+    pub download_dir: PathBuf,
+}
+
+/// Fallback download directory: the OS downloads folder, or the temp dir if it
+/// cannot be resolved. Mirrors `downloader::downloads_dir`.
+fn default_download_dir() -> PathBuf {
+    dirs::download_dir().unwrap_or_else(std::env::temp_dir)
 }
 
 impl Default for QueueConfig {
@@ -223,6 +241,7 @@ impl Default for QueueConfig {
             max_retries: 3,
             auto_start: true,
             speed_limit_global: 0,
+            download_dir: default_download_dir(),
         }
     }
 }

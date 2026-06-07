@@ -113,6 +113,12 @@ impl Categorizer {
         self.enabled
     }
 
+    /// The configured download directory (the base under which category
+    /// subfolders are created, and where the engine saves completed files).
+    pub fn download_dir(&self) -> &Path {
+        &self.download_dir
+    }
+
     /// Validate user-supplied category rules against the configured limits.
     ///
     /// Enforces at most [`MAX_USER_CATEGORIES`] categories, each with at most

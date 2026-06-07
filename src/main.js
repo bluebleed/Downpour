@@ -78,6 +78,20 @@ function humanEta(seconds) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+/* Format a Unix-seconds timestamp as a short local date + time. */
+function humanDateTime(secs) {
+  if (!secs) return "";
+  const d = new Date(secs * 1000);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /* Escape text destined for innerHTML to avoid breaking markup / injection. */
 function escapeHtml(str) {
   return String(str ?? "").replace(
@@ -124,67 +138,60 @@ function showToast(message, type = "info", timeout = 4000) {
 }
 
 /* Pick a file icon from the download category, type, or filename extension. */
-const CATEGORY_ICONS = {
-  Videos: "🎬",
-  Music: "🎵",
-  Audio: "🎵",
-  Images: "🖼️",
-  Documents: "📄",
-  Archives: "🗜️",
-  Programs: "⚙️",
+/* Monochrome line icons (inherit currentColor) matching the app theme, keyed by
+   a small set of file "types" rather than colorful emoji. */
+function svgFileIcon(inner) {
+  return `<svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+}
+
+const FILE_ICONS = {
+  video: svgFileIcon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/>'),
+  audio: svgFileIcon('<path d="M9 18V6l11-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>'),
+  image: svgFileIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5L5 20"/>'),
+  document: svgFileIcon('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>'),
+  archive: svgFileIcon('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 3v3M10 6h4M10 9h4M11 12h2v3h-2z"/>'),
+  app: svgFileIcon('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>'),
+  disc: svgFileIcon('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>'),
+  package: svgFileIcon('<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'),
+  generic: svgFileIcon('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
 };
 
-const EXTENSION_ICONS = {
-  mp4: "🎬",
-  mkv: "🎬",
-  avi: "🎬",
-  mov: "🎬",
-  webm: "🎬",
-  m4v: "🎬",
-  mp3: "🎵",
-  flac: "🎵",
-  wav: "🎵",
-  aac: "🎵",
-  ogg: "🎵",
-  jpg: "🖼️",
-  jpeg: "🖼️",
-  png: "🖼️",
-  gif: "🖼️",
-  svg: "🖼️",
-  webp: "🖼️",
-  pdf: "📄",
-  doc: "📄",
-  docx: "📄",
-  xls: "📊",
-  xlsx: "📊",
-  ppt: "📊",
-  pptx: "📊",
-  txt: "📝",
-  zip: "🗜️",
-  rar: "🗜️",
-  "7z": "🗜️",
-  tar: "🗜️",
-  gz: "🗜️",
-  iso: "💿",
-  exe: "⚙️",
-  msi: "⚙️",
-  dmg: "💿",
-  deb: "📦",
-  apk: "📦",
+const CATEGORY_TYPES = {
+  Videos: "video",
+  Music: "audio",
+  Audio: "audio",
+  Images: "image",
+  Documents: "document",
+  Archives: "archive",
+  Programs: "app",
 };
 
-function fileIcon(item) {
-  if (item.downloadType === "media") return "🎬";
-  if (item.category && CATEGORY_ICONS[item.category]) {
-    return CATEGORY_ICONS[item.category];
-  }
+const EXTENSION_TYPES = {
+  mp4: "video", mkv: "video", avi: "video", mov: "video", webm: "video", m4v: "video",
+  mp3: "audio", flac: "audio", wav: "audio", aac: "audio", ogg: "audio", m4a: "audio", opus: "audio",
+  jpg: "image", jpeg: "image", png: "image", gif: "image", svg: "image", webp: "image",
+  pdf: "document", doc: "document", docx: "document", txt: "document",
+  xls: "document", xlsx: "document", ppt: "document", pptx: "document",
+  zip: "archive", rar: "archive", "7z": "archive", tar: "archive", gz: "archive",
+  iso: "disc", dmg: "disc",
+  exe: "app", msi: "app",
+  deb: "package", apk: "package",
+};
+
+function fileType(item) {
+  if (item.downloadType === "media") return "video";
+  if (item.category && CATEGORY_TYPES[item.category]) return CATEGORY_TYPES[item.category];
   const name = item.filename || "";
   const dot = name.lastIndexOf(".");
   if (dot >= 0) {
     const ext = name.slice(dot + 1).toLowerCase();
-    if (EXTENSION_ICONS[ext]) return EXTENSION_ICONS[ext];
+    if (EXTENSION_TYPES[ext]) return EXTENSION_TYPES[ext];
   }
-  return "📄";
+  return "generic";
+}
+
+function fileIcon(item) {
+  return FILE_ICONS[fileType(item)] || FILE_ICONS.generic;
 }
 
 /* Glyph shown on the status badge per status. */
@@ -259,6 +266,47 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !addModal.hidden) closeModal();
 });
 
+/* ─── Confirm modal ───────────────────────────────────────────────────── */
+const confirmModal = document.querySelector("#confirm-modal");
+const confirmTitle = document.querySelector("#confirm-title");
+const confirmMessage = document.querySelector("#confirm-message");
+const confirmOk = document.querySelector("#confirm-ok");
+const confirmCancel = document.querySelector("#confirm-cancel");
+let confirmResolve = null;
+
+/* Show a themed confirm dialog. Resolves true (confirmed) or false (cancelled). */
+function confirmDialog({ title, message, confirmLabel = "Confirm", danger = false }) {
+  confirmTitle.textContent = title;
+  confirmMessage.textContent = message;
+  confirmOk.textContent = confirmLabel;
+  confirmOk.classList.toggle("btn-danger", danger);
+  confirmOk.classList.toggle("btn-primary", !danger);
+  confirmModal.hidden = false;
+  confirmOk.focus();
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+  });
+}
+
+function resolveConfirm(result) {
+  if (confirmModal.hidden) return;
+  confirmModal.hidden = true;
+  if (confirmResolve) {
+    const r = confirmResolve;
+    confirmResolve = null;
+    r(result);
+  }
+}
+
+confirmOk.addEventListener("click", () => resolveConfirm(true));
+confirmCancel.addEventListener("click", () => resolveConfirm(false));
+confirmModal.addEventListener("click", (e) => {
+  if (e.target === confirmModal) resolveConfirm(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !confirmModal.hidden) resolveConfirm(false);
+});
+
 /* Live-update the segment count label as the slider moves. */
 segmentsInput.addEventListener("input", () => {
   segmentsValue.textContent = segmentsInput.value;
@@ -288,6 +336,11 @@ addForm.addEventListener("submit", async (e) => {
 
 /* ─── Download cards ──────────────────────────────────────────────────── */
 
+/* Monochrome line icons (inherit currentColor) so they match the action-button
+   theme rather than a colorful emoji. */
+const ICON_FOLDER = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M1.75 4.25a1 1 0 0 1 1-1h2.84a1 1 0 0 1 .7.3l.92.9a1 1 0 0 0 .7.3h4.64a1 1 0 0 1 1 1v6.2a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/></svg>`;
+const ICON_TRASH = `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 4.25h10.5M6 4.25V3.1a.85.85 0 0 1 .85-.85h2.3a.85.85 0 0 1 .85.85v1.15M4.6 4.25l.5 8.05a1 1 0 0 0 1 .95h3.8a1 1 0 0 0 1-.95l.5-8.05M6.6 6.7v4M9.4 6.7v4"/></svg>`;
+
 /* Per-status action buttons. Returns an array of {action, title, glyph}. */
 function actionsFor(status) {
   switch (status) {
@@ -313,7 +366,12 @@ function actionsFor(status) {
         { action: "cancel", title: "Remove", glyph: "✕", danger: true },
       ];
     case "complete":
-      return [{ action: "cancel", title: "Remove", glyph: "✕", danger: true }];
+      return [
+        { action: "open", title: "Open file", glyph: "↗", danger: false },
+        { action: "reveal", title: "Open containing folder", glyph: ICON_FOLDER, danger: false },
+        { action: "delete", title: "Delete file from disk", glyph: ICON_TRASH, danger: true },
+        { action: "remove", title: "Remove from list", glyph: "✕", danger: false },
+      ];
     default:
       return [{ action: "cancel", title: "Cancel", glyph: "✕", danger: true }];
   }
@@ -340,11 +398,13 @@ function renderRow(item) {
     rows.set(item.id, li);
   }
 
-  const pct =
-    item.totalSize > 0
-      ? Math.min(100, Math.round((item.downloaded / item.totalSize) * 100))
-      : 0;
   const status = item.status || "queued";
+  const pct =
+    status === "complete"
+      ? 100
+      : item.totalSize > 0
+        ? Math.min(100, Math.round((item.downloaded / item.totalSize) * 100))
+        : 0;
 
   li.dataset.status = status;
   li.dataset.filename = (item.filename || "").toLowerCase();
@@ -354,6 +414,12 @@ function renderRow(item) {
     item.totalSize > 0
       ? `${humanSize(item.downloaded)} / ${humanSize(item.totalSize)}`
       : humanSize(item.downloaded);
+
+  // Completed downloads show when they finished; others show when they were added.
+  const isComplete = status === "complete";
+  const tsSecs = isComplete && item.completedAt ? item.completedAt : item.createdAt;
+  const dateText = humanDateTime(tsSecs);
+  const dateLabel = isComplete ? "Completed" : "Added";
 
   li.innerHTML = `
     <div class="download-card__head">
@@ -372,6 +438,7 @@ function renderRow(item) {
       <span class="download-card__pct">${pct}%</span>
       ${status === "downloading" && item.eta != null ? `<span class="download-card__eta">ETA ${humanEta(item.eta)}</span>` : ""}
       <span class="download-card__meta-spacer"></span>
+      ${dateText ? `<span class="download-card__date" title="${dateLabel}">${dateLabel} ${escapeHtml(dateText)}</span>` : ""}
       ${
         status === "error" && item.errorMessage
           ? `<span class="download-card__error" title="${escapeHtml(item.errorMessage)}">${escapeHtml(item.errorMessage)}</span>`
@@ -471,20 +538,49 @@ const ACTION_COMMANDS = {
   pause: "pause_download",
   resume: "resume_download",
   cancel: "cancel_download",
+  open: "open_download_file",
+  reveal: "reveal_download_file",
+  delete: "delete_download_file",
+  remove: "remove_download",
 };
+
+/* Actions that drop the card from the interface once the command succeeds. */
+const REMOVING_ACTIONS = new Set(["cancel", "remove", "delete"]);
 
 list.addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-action]");
   if (!btn) return;
   const card = btn.closest(".download-card");
   const id = card?.dataset.id;
-  const command = ACTION_COMMANDS[btn.dataset.action];
+  const action = btn.dataset.action;
+  const command = ACTION_COMMANDS[action];
   if (!id || !command) return;
+
+  // Deleting the file from disk is destructive — confirm first when the
+  // "confirm before delete" setting is enabled (the default).
+  if (action === "delete") {
+    let askFirst = true;
+    try {
+      const s = await invoke("get_settings");
+      askFirst = s.confirmOnDelete !== false;
+    } catch {
+      askFirst = true;
+    }
+    if (askFirst) {
+      const confirmed = await confirmDialog({
+        title: "Delete file",
+        message: `Delete "${card.dataset.filename || "this file"}" from disk? This cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!confirmed) return;
+    }
+  }
 
   btn.disabled = true;
   try {
     await invoke(command, { id });
-    if (btn.dataset.action === "cancel") {
+    if (REMOVING_ACTIONS.has(action)) {
       // Optimistically drop the card; queue-changed will reconcile.
       card.remove();
       rows.delete(id);
@@ -788,6 +884,9 @@ const mediaExtractBtn = document.querySelector("#media-extract");
 
 /* The URL whose formats are currently displayed. */
 let mediaCurrentUrl = "";
+/* The format list currently displayed, so the download handler can look up the
+   selected format's video/audio capabilities. */
+let mediaCurrentFormats = [];
 /* id -> <li> for media download cards in the media view. */
 const mediaRows = new Map();
 
@@ -812,18 +911,46 @@ function humanDuration(seconds) {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
 
-/* Describe a media format for the <option> label. */
+/* Describe a media format for the <option> label. YouTube serves high-res video
+   as a video-only stream (DASH); we auto-merge it with the best audio on
+   download, so label it accordingly rather than the confusing "video only". */
 function formatLabel(fmt) {
   const kind = fmt.hasVideo && fmt.hasAudio
     ? "video+audio"
     : fmt.hasVideo
-      ? "video only"
+      ? "video + best audio (merged)"
       : fmt.hasAudio
         ? "audio only"
         : "";
   const size = fmt.filesize ? ` · ${humanSize(fmt.filesize)}` : "";
   const ext = fmt.ext ? ` · ${fmt.ext}` : "";
   return `${fmt.quality || fmt.formatId}${ext}${kind ? ` · ${kind}` : ""}${size}`;
+}
+
+/* The yt-dlp format selector to download for a chosen format. A video-only
+   stream is paired with the best audio — preferring an AAC (m4a) track so the
+   result merges into a broadly-playable MP4 — falling back to any audio, then to
+   the video alone if the item has no separate audio. */
+function formatSelector(fmt) {
+  if (fmt && fmt.hasVideo && !fmt.hasAudio) {
+    return `${fmt.formatId}+bestaudio[ext=m4a]/${fmt.formatId}+bestaudio/${fmt.formatId}`;
+  }
+  return fmt ? fmt.formatId : "";
+}
+
+/* Collapse near-duplicate formats (yt-dlp returns the same quality from several
+   internal player clients). Keep one per quality/ext/kind, preferring the entry
+   with the largest known file size. */
+function dedupeFormats(formats) {
+  const best = new Map();
+  for (const f of formats) {
+    const key = `${f.quality}|${f.ext}|${f.hasVideo ? "v" : ""}${f.hasAudio ? "a" : ""}`;
+    const prev = best.get(key);
+    if (!prev || (f.filesize || 0) > (prev.filesize || 0)) {
+      best.set(key, f);
+    }
+  }
+  return [...best.values()];
 }
 
 function populateMediaInfo(info) {
@@ -842,7 +969,8 @@ function populateMediaInfo(info) {
   }
 
   mediaFormatSelect.innerHTML = "";
-  const formats = info.formats || [];
+  const formats = dedupeFormats(info.formats || []);
+  mediaCurrentFormats = formats;
   if (!formats.length) {
     const opt = document.createElement("option");
     opt.value = "";
@@ -890,10 +1018,13 @@ mediaDownloadBtn.addEventListener("click", async () => {
     return;
   }
   const filename = mediaFilename.value.trim();
+  // Pair a video-only stream with the best audio so the result has sound.
+  const selectedFormat = mediaCurrentFormats.find((f) => f.formatId === formatId);
+  const formatSelectorValue = formatSelector(selectedFormat) || formatId;
 
   mediaDownloadBtn.disabled = true;
   try {
-    const args = { url: mediaCurrentUrl, formatId };
+    const args = { url: mediaCurrentUrl, formatId: formatSelectorValue };
     if (filename) args.filename = filename;
     const item = await invoke("start_media_download", args);
     renderMediaRow(item);
@@ -929,7 +1060,7 @@ function renderMediaRow(item) {
 
   li.innerHTML = `
     <div class="download-card__head">
-      <span class="download-card__icon" aria-hidden="true">🎬</span>
+      <span class="download-card__icon" aria-hidden="true">${fileIcon(item)}</span>
       <span class="download-card__filename" title="${escapeHtml(item.url)}">${escapeHtml(item.filename)}</span>
       ${status === "downloading" && item.speed > 0 ? `<span class="download-card__speed">↓ ${humanSpeed(item.speed)}</span>` : ""}
       <span class="badge badge--${status}">${status}</span>
@@ -1000,6 +1131,10 @@ const setSegments = document.querySelector("#set-default-segments");
 const setSpeedLimit = document.querySelector("#set-speed-limit");
 const setDownloadDir = document.querySelector("#set-download-dir");
 const setAutoCategorize = document.querySelector("#set-auto-categorize");
+const setResumeOnStartup = document.querySelector("#set-resume-on-startup");
+const setMinimizeToTray = document.querySelector("#set-minimize-to-tray");
+const setNotificationsEnabled = document.querySelector("#set-notifications-enabled");
+const setConfirmOnDelete = document.querySelector("#set-confirm-on-delete");
 const setYtdlpPath = document.querySelector("#set-ytdlp-path");
 const setFfmpegPath = document.querySelector("#set-ffmpeg-path");
 
@@ -1067,6 +1202,10 @@ function fillSettingsForm(settings) {
   setSpeedLimit.value = Math.round((settings.speedLimit ?? 0) / 1024);
   setDownloadDir.value = settings.downloadDir ?? "";
   setAutoCategorize.checked = !!settings.autoCategorize;
+  setResumeOnStartup.checked = !!settings.resumeOnStartup;
+  setMinimizeToTray.checked = !!settings.minimizeToTray;
+  setNotificationsEnabled.checked = settings.notificationsEnabled !== false;
+  setConfirmOnDelete.checked = settings.confirmOnDelete !== false;
   setYtdlpPath.value = settings.ytdlpPath ?? "";
   setFfmpegPath.value = settings.ffmpegPath ?? "";
 
@@ -1188,6 +1327,10 @@ function collectSettings() {
     defaultSegments: segments,
     speedLimit: speedKb * 1024,
     autoCategorize: setAutoCategorize.checked,
+    resumeOnStartup: setResumeOnStartup.checked,
+    minimizeToTray: setMinimizeToTray.checked,
+    notificationsEnabled: setNotificationsEnabled.checked,
+    confirmOnDelete: setConfirmOnDelete.checked,
     categories,
     ytdlpPath: setYtdlpPath.value.trim() || null,
     ffmpegPath: setFfmpegPath.value.trim() || null,

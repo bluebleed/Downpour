@@ -591,8 +591,10 @@ mod settings_roundtrip_tests {
                     auto_categorize,
                     categories,
                     auto_start_queue,
+                    resume_on_startup: false,
                     minimize_to_tray,
                     notifications_enabled,
+                    confirm_on_delete: true,
                     capture_min_size,
                     capture_extensions,
                     ytdlp_path: ytdlp_path.map(PathBuf::from),
@@ -780,6 +782,7 @@ mod prop_round_trip_tests {
                 download_type,
                 segment_count,
                 media_format_id,
+                output_path: None,
             }
         }
     }
@@ -920,6 +923,7 @@ mod prop_round_trip_tests {
             download_type: DownloadType::Http,
             segment_count: 4,
             media_format_id: None,
+            output_path: Some("/downloads/Software/big.iso".into()),
         };
 
         layer.save_download(&item).await.unwrap();

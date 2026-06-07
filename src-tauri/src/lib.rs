@@ -9,10 +9,14 @@ pub mod settings;
 pub mod speed_limiter;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{Emitter, Listener, Manager};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Listener, Manager, WindowEvent};
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::Mutex;
 
 use categorizer::Categorizer;
@@ -33,6 +37,12 @@ type MediaState = Arc<Mutex<MediaExtractor>>;
 
 /// The auto-categorizer, rebuilt when category rules or the download dir change.
 type CategorizerState = Arc<Mutex<Categorizer>>;
+
+/// Live "minimize to tray on window close" flag. Seeded from
+/// `AppSettings.minimize_to_tray` and updated by `update_settings`, so the
+/// window-close handler (a synchronous closure) can read it without locking the
+/// async settings mutex.
+type MinimizeToTray = Arc<AtomicBool>;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -152,6 +162,7 @@ async fn update_settings(
     persistence: tauri::State<'_, PersistenceLayer>,
     media: tauri::State<'_, MediaState>,
     categorizer: tauri::State<'_, CategorizerState>,
+    minimize_to_tray: tauri::State<'_, MinimizeToTray>,
     new_settings: AppSettings,
 ) -> Result<AppSettings, String> {
     // Validate the bounded numeric fields (Req 11.1, 11.2, 11.3).
@@ -169,8 +180,10 @@ async fn update_settings(
     // Apply to live components (Req 11.5).
     queue.set_max_concurrent(new_settings.max_concurrent).await;
     queue.set_speed_limit(new_settings.speed_limit);
+    queue.set_download_dir(new_settings.download_dir.clone());
     *media.lock().await = build_media_extractor(&new_settings);
     *categorizer.lock().await = Categorizer::from_settings(&new_settings);
+    minimize_to_tray.store(new_settings.minimize_to_tray, Ordering::SeqCst);
     *settings.lock().await = new_settings.clone();
 
     Ok(new_settings)
@@ -225,6 +238,120 @@ async fn set_max_concurrent(
         .await
         .map_err(|e| format!("{e:#}"))?;
     Ok(())
+}
+
+// ─── Open / reveal completed files ───────────────────────────────────────────────
+
+/// Resolve the on-disk path of a completed download: its recorded `output_path`
+/// (set on completion / after categorization), falling back to
+/// `download_dir/filename`. Errors if the file is missing.
+async fn resolve_download_path(
+    downloads: &Downloads,
+    queue: &QueueManager,
+    id: &str,
+) -> Result<PathBuf, String> {
+    let item = {
+        let map = downloads.lock().await;
+        map.get(id)
+            .cloned()
+            .ok_or_else(|| format!("unknown download id: {id}"))?
+    };
+    let path = item
+        .output_path
+        .clone()
+        .unwrap_or_else(|| queue.download_dir().join(&item.filename));
+    if !path.exists() {
+        return Err(format!("file not found: {}", path.display()));
+    }
+    Ok(path)
+}
+
+/// Launch a path with the OS default handler, or (when `reveal`) open its parent
+/// folder with the file selected.
+fn os_open(path: &Path, reveal: bool) -> Result<(), String> {
+    let mut command = {
+        #[cfg(target_os = "windows")]
+        {
+            // explorer's `/select,` syntax is parsed by explorer itself, not the
+            // CRT argv splitter — paths with spaces (e.g. "Yash Verma") break the
+            // default Command quoting and explorer opens the wrong folder. Build
+            // the argument verbatim with `raw_arg` and quote the path ourselves.
+            use std::os::windows::process::CommandExt;
+            let mut c = std::process::Command::new("explorer");
+            if reveal {
+                c.raw_arg(format!("/select,\"{}\"", path.display()));
+            } else {
+                c.raw_arg(format!("\"{}\"", path.display()));
+            }
+            c
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mut c = std::process::Command::new("open");
+            if reveal {
+                c.arg("-R");
+            }
+            c.arg(path);
+            c
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            // No portable "reveal + select"; open the containing folder instead.
+            let target = if reveal {
+                path.parent().unwrap_or(path)
+            } else {
+                path
+            };
+            let mut c = std::process::Command::new("xdg-open");
+            c.arg(target);
+            c
+        }
+    };
+    command.spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Open a completed download with the OS default application.
+#[tauri::command]
+async fn open_download_file(
+    downloads: tauri::State<'_, Downloads>,
+    queue: tauri::State<'_, QueueManager>,
+    id: String,
+) -> Result<(), String> {
+    let path = resolve_download_path(&downloads, &queue, &id).await?;
+    os_open(&path, false)
+}
+
+/// Reveal a completed download in its containing folder (file selected where the
+/// platform supports it).
+#[tauri::command]
+async fn reveal_download_file(
+    downloads: tauri::State<'_, Downloads>,
+    queue: tauri::State<'_, QueueManager>,
+    id: String,
+) -> Result<(), String> {
+    let path = resolve_download_path(&downloads, &queue, &id).await?;
+    os_open(&path, true)
+}
+
+/// Delete a download's file from disk and remove the entry from the queue. The
+/// file removal is best-effort (a missing file is not an error); the entry is
+/// always removed.
+#[tauri::command]
+async fn delete_download_file(
+    downloads: tauri::State<'_, Downloads>,
+    queue: tauri::State<'_, QueueManager>,
+    id: String,
+) -> Result<(), String> {
+    let item = { downloads.lock().await.get(&id).cloned() };
+    if let Some(item) = item {
+        let path = item
+            .output_path
+            .clone()
+            .unwrap_or_else(|| queue.download_dir().join(&item.filename));
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+    queue.remove(&id).await.map_err(|e| format!("{e:#}"))
 }
 
 // ─── Media (yt-dlp) commands ─────────────────────────────────────────────────────
@@ -323,13 +450,14 @@ fn spawn_completion_categorizer(
                 }
             }
 
-            // The engine saves files into the OS downloads directory.
-            let file_path = downloader::downloads_dir().join(&item.filename);
-
             let cat = categorizer.lock().await;
             if !cat.is_enabled() {
                 return;
             }
+            // The engine saves files into the configured download directory, so
+            // resolve the source path against the same directory the categorizer
+            // uses for its category subfolders (kept in sync via update_settings).
+            let file_path = cat.download_dir().join(&item.filename);
             let label = cat.categorize(&item.filename, None).map(str::to_string);
             let moved = cat.process(&app, &file_path, None).await;
             drop(cat);
@@ -338,7 +466,7 @@ fn spawn_completion_categorizer(
                 return;
             }
 
-            // Record the resolved category and persist it.
+            // Record the resolved category and the file's new location, then persist.
             let snapshot = {
                 let mut map = downloads.lock().await;
                 let it = match map.get_mut(&item.id) {
@@ -346,12 +474,113 @@ fn spawn_completion_categorizer(
                     None => return,
                 };
                 it.category = label;
+                it.output_path = moved;
                 it.clone()
             };
             let _ = persistence.save_download(&snapshot).await;
             let _ = app.emit("download-progress", snapshot);
         });
     });
+}
+
+// ─── Completion → desktop notification wiring ─────────────────────────────────────
+
+/// Listen for download completions and show a native desktop notification when
+/// `AppSettings.notifications_enabled` is set. Dedupes per id so a download is
+/// announced once even though `download-progress` fires repeatedly.
+fn spawn_completion_notifier(app: tauri::AppHandle, settings: SettingsState) {
+    let notified: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let listen_handle = app.clone();
+
+    listen_handle.listen("download-progress", move |event| {
+        let item: DownloadItem = match serde_json::from_str(event.payload()) {
+            Ok(item) => item,
+            Err(_) => return,
+        };
+        if item.status != DownloadStatus::Complete {
+            return;
+        }
+
+        let app = app.clone();
+        let settings = settings.clone();
+        let notified = notified.clone();
+
+        tauri::async_runtime::spawn(async move {
+            // Announce each completed download only once.
+            {
+                let mut seen = notified.lock().await;
+                if !seen.insert(item.id.clone()) {
+                    return;
+                }
+            }
+            if !settings.lock().await.notifications_enabled {
+                return;
+            }
+            let _ = app
+                .notification()
+                .builder()
+                .title("Download complete")
+                .body(&item.filename)
+                .show();
+        });
+    });
+}
+
+// ─── System tray ─────────────────────────────────────────────────────────────────
+
+/// Build the system tray icon with a Show / Hide / Quit menu (Req: system tray).
+///
+/// Left-clicking the tray icon shows and focuses the main window; the menu items
+/// give explicit show/hide/quit control. Pairs with the window-close handler,
+/// which hides to the tray instead of quitting when `minimize_to_tray` is on.
+fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show_i = MenuItem::with_id(app, "tray_show", "Show Downpour", true, None::<&str>)?;
+    let hide_i = MenuItem::with_id(app, "tray_hide", "Hide to Tray", true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "tray_quit", "Quit Downpour", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_i, &hide_i, &quit_i])?;
+
+    let mut builder = TrayIconBuilder::with_id("main-tray")
+        .tooltip("Downpour")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray_show" => show_main_window(app),
+            "tray_hide" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+            "tray_quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // Left-click (button released) brings the window back.
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+
+    // Reuse the embedded window icon for the tray when one is available.
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Show and focus the main window (used by the tray menu and icon click).
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }
 
 // ─── App entry point ─────────────────────────────────────────────────────────────
@@ -390,6 +619,7 @@ pub fn run() {
                 max_retries: 3,
                 auto_start: settings.auto_start_queue,
                 speed_limit_global: settings.speed_limit,
+                download_dir: settings.download_dir.clone(),
             };
             // The media extractor is shared with the queue so `Media` downloads
             // run through the scheduler (respecting max_concurrent) and pick up
@@ -404,11 +634,18 @@ pub fn run() {
             )
             .with_media_extractor(media_state.clone());
 
-            // Restore the queue from disk without auto-starting anything (Req 5.2).
+            // Restore the queue from disk. By default nothing auto-starts (Req 5.2):
+            // restored downloads stay paused until the user resumes. If the user
+            // opted into `resume_on_startup`, auto-resume them after restore.
             let restore_queue = queue.clone();
+            let resume_on_startup = settings.resume_on_startup;
             tauri::async_runtime::block_on(async move {
                 if let Err(e) = restore_queue.restore_from_disk().await {
                     eprintln!("failed to restore queue from disk: {e:#}");
+                } else if resume_on_startup {
+                    if let Err(e) = restore_queue.resume_all().await {
+                        eprintln!("failed to auto-resume downloads on startup: {e:#}");
+                    }
                 }
             });
 
@@ -438,6 +675,32 @@ pub fn run() {
                 persistence.clone(),
             );
 
+            // Announce completed downloads via native notifications.
+            spawn_completion_notifier(handle.clone(), settings_state.clone());
+
+            // Build the system tray (Show / Hide / Quit + click-to-show).
+            if let Err(e) = build_tray(app) {
+                eprintln!("failed to build system tray: {e:#}");
+            }
+
+            // Minimize-to-tray: when enabled, intercept the window close and hide
+            // the window instead of quitting. The flag is read live so toggling
+            // the setting takes effect without a restart.
+            let minimize_to_tray: MinimizeToTray =
+                Arc::new(AtomicBool::new(settings.minimize_to_tray));
+            if let Some(window) = app.get_webview_window("main") {
+                let flag = minimize_to_tray.clone();
+                let win = window.clone();
+                window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        if flag.load(Ordering::SeqCst) {
+                            api.prevent_close();
+                            let _ = win.hide();
+                        }
+                    }
+                });
+            }
+
             // Register everything as managed state for the command surface.
             app.manage(queue);
             app.manage(persistence);
@@ -445,6 +708,7 @@ pub fn run() {
             app.manage(settings_state);
             app.manage(media_state);
             app.manage(categorizer_state);
+            app.manage(minimize_to_tray);
 
             Ok(())
         })
@@ -459,6 +723,9 @@ pub fn run() {
             pause_all,
             resume_all,
             get_queue_state,
+            open_download_file,
+            reveal_download_file,
+            delete_download_file,
             get_settings,
             update_settings,
             set_speed_limit,
