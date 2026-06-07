@@ -12,3 +12,6 @@ All 17 task groups are marked `[x]`. The project is a functioning download manag
 - The Kiro spec lives in `.kiro/specs/idm-download-manager/` — requirements.md + tasks.md + design.md.
 - The frontend is vanilla JS (no framework) — Tauri IPC via `@tauri-apps/api`.
 ## Known TODOs / Next Work
+1. ~~**Wire `AppSettings.download_dir` to `downloader.rs`**~~ ✅ DONE (June 2026). Configured dir flows settings → QueueConfig → QueueManager live `RwLock<PathBuf>` → `dest_dir` through the engine. `downloads_dir()` is now fallback-only. See ARCHITECTURE.md.
+2. ~~**"Resume All on Startup" UX**~~ ✅ DONE (June 2026). New `AppSettings.resume_on_startup` (default off); `lib.rs` calls `resume_all()` after restore when enabled. UI toggle added to Settings view.
+3. **System tray**: `tauri-plugin-notification` is registered but tray minimize not implemented. ⚠️ Needs a full app build to verify — best done on the user's machine (no display/webview in agent env).

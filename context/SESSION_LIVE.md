@@ -1610,3 +1610,85 @@ Now the panel obeys its `hidden` attribute, so it only appears when `renderPlayl
 For a plain single video, you'll only see the normal format card — no playlist controls.
 
 This is CSS-only, so it **hot-reloads** — no Rust rebuild needed; just reload the Media view (or it'll refresh on save). The empty panel should be gone immediately.
+
+### 2026-06-07 19:02:02 — You
+can we add downlaod with download when right clicked on videos on social websites or youtube etc. Discuss
+
+### 2026-06-07 19:02:56 — Claude
+Good idea — this is the classic IDM-style "right-click → download" and it fits naturally because you already have a browser extension + a capture server. Let me ground the discussion in what the extension currently has.
+
+### 2026-06-07 19:03:29 — Claude
+The extension is MV3 with `<all_urls>` host access and already POSTs to the capture server — so this is very doable. Here's the design discussion.
+
+## How it would work (building on what exists)
+1. **Extension** gains the `contextMenus` permission and registers right-click items. Chrome lets you scope menu items to specific contexts: `page`, `link`, `video`, `image`, `selection`. So you can show "Download with Downpour" when right-clicking a video element, a link, or anywhere on a media page.
+2. On click, the extension figures out the right URL and POSTs it to the Downpour capture server (the same `127.0.0.1:53472` channel it already uses).
+3. The **capture server** routes that URL to the **yt-dlp/media path** (not the HTTP segmented engine), so it works for YouTube/social pages.
+
+## The key technical wrinkle: which URL to send
+Right-clicking a `<video>` usually gives a `blob:` source URL, which is **not** downloadable. So per context:
+- **Video / page context** → send `pageUrl` (the watch/post URL). That's what yt-dlp actually needs, and it's what makes YouTube, X, Instagram, Reddit, etc. work.
+- **Link context** → send `linkUrl`. The server can sniff it: ends in a real file extension → HTTP engine; otherwise → yt-dlp.
+
+## Two UX models (I'd offer both)
+- **A) Quick download** — right-click → "Download with Downpour" → it immediately enqueues using a **default quality** (your 1080p/Best preset from Settings), no prompts. Closest to the IDM feel.
+- **B) Download with options** — right-click → "Download with Downpour…" → the app **pops to the front with the Media tab pre-filled and auto-extracted**, so you pick quality/format (and see playlists). More control.
+
+The clean implementation for B is: the capture server, on receiving a "media with options" request, emits an event to the app's UI ("open this URL in the Media tab") — which reuses everything we just built (extract → format picker → playlist checklist).
+
+## Backend changes needed
+- **`capture_server.rs`**: a new endpoint (e.g. `/capture-media`) or a `kind: "media" | "direct"` field on the existing `/capture`. Media requests enqueue a `Media` download with a default format selector (quick mode) or trigger the "open in Media tab" UI event (options mode).
+- **Settings**: a "default right-click quality" and a toggle to enable the context menu. The recent filename/merge/categorize work means the resulting download already gets the real title, mp4 merge, and `Videos/` sorting for free.
+
+## Constraints to be honest about
+- **Downpour must be running.** The capture server only listens while the app is open; if it's closed, the POST fails. The extension should detect that and show a small "Open Downpour first" notification (and ideally we add a "launch on capture" affordance later via native messaging — bigger task).
+- **DRM sites still won't work** (Netflix etc.) — same policy boundary, which is correct.
+- **Cross-browser**: this targets Chrome/Edge (MV3 `chrome.contextMenus`). Firefox uses `browser.menus` with minor differences; doable but a separate pass.
+- **Site coverage = yt-dlp's** — public YouTube/X/Instagram/TikTok/Reddit/etc. work; private/login content needs the cookies feature we deferred.
+
+## My recommendation
+Start with **Model B (open Media tab with options)** as the primary action — it reuses everything we built (format picker, presets, playlist detection) and gives you control — plus a secondary **"Quick download (1080p)"** item for the fast path. That covers both the "I want it now" and "let me choose" cases without much extra surface.
+
+Want me to plan this out in detail (extension context-menu handler + capture-server media endpoint + the "open in Media tab" UI event) when you're ready? Or scope just the Quick-download path first as an MVP?
+
+### 2026-06-07 19:09:51 — You
+default quality  be the highest possible quality available. and make a plan and task.md  with todays date inside the file first and save them in directory
+
+### 2026-06-07 19:10:21 — Claude
+I'll create a plan directory and a `task.md` with today's date, capturing the full design and a phased task list. Default quality = highest available, noted in the decisions.
+
+### 2026-06-07 19:11:10 — Claude
+Created the plan. Here's what's saved:
+
+**📄 [plans/right-click-download/task.md](plans/right-click-download/task.md)** (dated **2026-06-08**)
+
+It captures:
+
+- **Goal** — IDM-style right-click → "Download with Downpour" on YouTube/social sites, via the existing extension + capture server.
+- **Confirmed decisions** — including your call: **default quality = highest available** (the "Best available" selector, merged to mp4, no prompt). Two menu items: *Download with Downpour* (opens the Media tab pre-filled, with options) and *Quick download (Best)* (immediate, highest quality).
+- **Architecture diagram** — context-menu → `/capture-media` endpoint → either quick-enqueue or an `open-media` UI event, with the key wrinkle handled (use `pageUrl`, not the un-downloadable `blob:` video source).
+- **Phased task list with checkboxes** — Phase 1 (extension menu) → Phase 2 (capture-server media endpoint) → Phase 3 (open-in-Media-tab UI) → Phase 4 (settings/toggle) → Phase 5 (verify).
+- **Constraints & risks**, **out of scope**, and a note that quick-downloads **inherit all the recent work for free** (real filename, mp4 merge, real size, `Videos/` categorization).
+
+The plan is just saved — no code written yet. When you want to build it, say so and I'll work through the phases (starting with the extension context menu + capture-server endpoint), verifying as I go. Want me to also drop a short pointer to this plan in `context/WORKING_MEMORY.md` so it's easy to pick up next session?
+
+### 2026-06-07 19:21:42 — You
+Yes
+
+### 2026-06-07 19:21:51 — Claude
+I'll add the pointer via the Case C memory gatekeeper.
+
+### 2026-06-07 19:22:00 — Claude
+This is a Case C sprint note. Running the gatekeeper script from the project root:
+
+### 2026-06-07 19:22:18 — Claude
+**Saved to Active Sprint Memory.** The pointer to [plans/right-click-download/task.md](plans/right-click-download/task.md) is now in [context/WORKING_MEMORY.md](context/WORKING_MEMORY.md) (the script archived 3 older entries to stay under the 2,500-char cap — they're in `context/ARCHIVE_MEMORY.md`).
+
+So next session you (or I) can pick up the right-click feature straight from working memory → the full phased plan in the task.md.
+
+Open threads whenever you're ready:
+- **Build the right-click feature** (plan is ready to execute).
+- **Cookies-file option** (unlocks private/unlisted playlists) — deferred.
+- **Commit** the large pile of finished work (download_dir, tray, open/delete, icons, filename/Content-Disposition, media merge/naming/categorization, playlist download + 2K/4K, the playlist-panel CSS fix).
+
+Anything else?
