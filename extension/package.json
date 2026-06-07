@@ -1,0 +1,6 @@
+{
+  "name": "downpour-extension",
+  "private": true,
+  "type": "commonjs",
+  "description": "Downpour browser extension (Manifest V3). This package.json scopes the directory to CommonJS so the pure filter logic in filter.js can be require()d from Node-based tests; Chrome ignores it and only reads manifest.json."
+}

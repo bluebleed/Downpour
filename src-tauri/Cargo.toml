@@ -26,6 +26,19 @@ tower-http = { version = "0.5", features = ["cors"] }
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
 dirs = "5"
+tokio-util = { version = "0.7", features = ["rt"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[target.'cfg(unix)'.dependencies]
+# Used only for sending SIGTERM/SIGKILL to the yt-dlp child process group.
+libc = "0.2"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
+axum = "0.7"
 
 [profile.release]
 opt-level = "s"

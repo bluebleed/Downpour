@@ -7,25 +7,345 @@
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <h1>🌧️ Downpour</h1>
-      <form id="add-form" class="add-form">
-        <input
-          id="url-input"
-          type="url"
-          placeholder="Paste a download URL…"
-          autocomplete="off"
-          required
-        />
-        <button type="submit">Download</button>
-      </form>
-    </header>
+    <!-- ─── Sidebar navigation ─────────────────────────────────────────── -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__logo">
+        <span class="sidebar__logo-mark">🌧️</span>
+        <span class="sidebar__logo-text">Downpour</span>
+      </div>
 
-    <main>
-      <ul id="downloads" class="downloads">
-        <li class="empty">No downloads yet. Paste a URL above to start.</li>
-      </ul>
+      <nav class="sidebar__nav" id="nav">
+        <button class="nav-item active" data-view="downloads" type="button">
+          <span class="nav-item__icon" aria-hidden="true">⬇</span>
+          <span class="nav-item__label">Downloads</span>
+        </button>
+        <button class="nav-item" data-view="queue" type="button">
+          <span class="nav-item__icon" aria-hidden="true">≣</span>
+          <span class="nav-item__label">Queue</span>
+        </button>
+        <button class="nav-item" data-view="media" type="button">
+          <span class="nav-item__icon" aria-hidden="true">▶</span>
+          <span class="nav-item__label">Media</span>
+        </button>
+        <button class="nav-item" data-view="settings" type="button">
+          <span class="nav-item__icon" aria-hidden="true">⚙</span>
+          <span class="nav-item__label">Settings</span>
+        </button>
+      </nav>
+
+      <button
+        class="sidebar__collapse"
+        id="collapse-toggle"
+        type="button"
+        title="Collapse sidebar"
+        aria-label="Collapse sidebar"
+      >
+        <span class="sidebar__collapse-icon">«</span>
+      </button>
+    </aside>
+
+    <!-- ─── Main content area (view switching) ─────────────────────────── -->
+    <main class="main-content" id="main-content">
+      <!-- Downloads view -->
+      <section class="view active" id="view-downloads" data-view="downloads">
+        <header class="view__header">
+          <h1 class="view__title">Downloads</h1>
+        </header>
+
+        <!-- Toolbar: search + status filter pills + density toggle -->
+        <div class="downloads-toolbar" id="downloads-toolbar">
+          <div class="search-box">
+            <span class="search-box__icon" aria-hidden="true">🔍</span>
+            <input
+              id="download-search"
+              class="input search-box__input"
+              type="search"
+              placeholder="Search downloads…"
+              autocomplete="off"
+              aria-label="Search downloads"
+            />
+          </div>
+
+          <div class="filter-pills" id="filter-pills" role="tablist" aria-label="Filter by status">
+            <button class="pill active" type="button" data-filter="all" role="tab" aria-selected="true">All</button>
+            <button class="pill" type="button" data-filter="downloading" role="tab" aria-selected="false">Downloading</button>
+            <button class="pill" type="button" data-filter="queued" role="tab" aria-selected="false">Queued</button>
+            <button class="pill" type="button" data-filter="paused" role="tab" aria-selected="false">Paused</button>
+            <button class="pill" type="button" data-filter="complete" role="tab" aria-selected="false">Complete</button>
+            <button class="pill" type="button" data-filter="error" role="tab" aria-selected="false">Error</button>
+          </div>
+
+          <button
+            id="density-toggle"
+            class="btn-ghost btn-ghost--sm density-toggle"
+            type="button"
+            title="Toggle compact view"
+            aria-label="Toggle compact view"
+            aria-pressed="false"
+          >
+            <span class="density-toggle__icon" aria-hidden="true">▤</span>
+            <span class="density-toggle__label">Compact</span>
+          </button>
+        </div>
+
+        <!-- Mount point for the detailed download list / cards. -->
+        <ul id="downloads" class="downloads view-comfortable" data-mount="download-list">
+          <li class="empty">No downloads yet. Use the + button to add one.</li>
+        </ul>
+      </section>
+
+      <!-- Queue view -->
+      <section class="view" id="view-queue" data-view="queue" hidden>
+        <header class="view__header view__header--row">
+          <h1 class="view__title">Queue</h1>
+          <button
+            id="queue-refresh"
+            class="btn-ghost btn-ghost--sm"
+            type="button"
+            title="Refresh queue"
+            aria-label="Refresh queue"
+          >
+            ↻ Refresh
+          </button>
+        </header>
+        <p class="view__hint">Drag items to reorder. Order applies to queued downloads.</p>
+        <ol class="queue-list" id="queue-list" data-mount="queue-view">
+          <li class="empty">Queue is empty.</li>
+        </ol>
+      </section>
+
+      <!-- Media view -->
+      <section class="view" id="view-media" data-view="media" hidden>
+        <header class="view__header">
+          <h1 class="view__title">Media</h1>
+        </header>
+        <div class="media" data-mount="media-view">
+          <form id="media-form" class="media__form">
+            <div class="media__input-row">
+              <input
+                id="media-url"
+                class="input"
+                type="url"
+                placeholder="Paste a media page URL…"
+                autocomplete="off"
+                required
+              />
+              <button class="btn-primary" type="submit" id="media-extract">Extract</button>
+            </div>
+            <p class="view__hint">
+              Only download media you are permitted to access.
+            </p>
+          </form>
+
+          <div class="media__status" id="media-status" hidden></div>
+
+          <div class="media__info glass-panel" id="media-info" hidden>
+            <div class="media__info-head">
+              <img class="media__thumb" id="media-thumb" alt="" hidden />
+              <div class="media__info-text">
+                <h2 class="media__title" id="media-title"></h2>
+                <p class="media__meta" id="media-meta"></p>
+              </div>
+            </div>
+            <div class="media__formats">
+              <label class="field__label" for="media-format">Format</label>
+              <select class="input select" id="media-format"></select>
+              <label class="field__label" for="media-filename">Filename (optional)</label>
+              <input
+                id="media-filename"
+                class="input"
+                type="text"
+                placeholder="Leave blank for the original title"
+                autocomplete="off"
+              />
+              <button class="btn-primary" type="button" id="media-download">Download</button>
+            </div>
+          </div>
+
+          <ul class="downloads view-comfortable media__downloads" id="media-downloads">
+            <li class="empty">No media downloads yet.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Settings view -->
+      <section class="view" id="view-settings" data-view="settings" hidden>
+        <header class="view__header">
+          <h1 class="view__title">Settings</h1>
+        </header>
+        <form class="settings" id="settings-form" data-mount="settings-view">
+          <fieldset class="settings__group glass-panel">
+            <legend class="settings__legend">Downloads</legend>
+
+            <div class="field">
+              <label class="field__label" for="set-max-concurrent">Max concurrent downloads</label>
+              <input
+                id="set-max-concurrent"
+                class="input"
+                type="number"
+                min="1"
+                max="10"
+                step="1"
+                required
+              />
+              <span class="field__hint">Between 1 and 10.</span>
+              <span class="field__error" data-error-for="set-max-concurrent" hidden></span>
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="set-default-segments">Default segments</label>
+              <input
+                id="set-default-segments"
+                class="input"
+                type="number"
+                min="1"
+                max="32"
+                step="1"
+                required
+              />
+              <span class="field__hint">Between 1 and 32.</span>
+              <span class="field__error" data-error-for="set-default-segments" hidden></span>
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="set-speed-limit">Speed limit (KB/s, 0 = unlimited)</label>
+              <input
+                id="set-speed-limit"
+                class="input"
+                type="number"
+                min="0"
+                step="1"
+                required
+              />
+              <span class="field__hint">0 for unlimited, otherwise kilobytes per second.</span>
+              <span class="field__error" data-error-for="set-speed-limit" hidden></span>
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="set-download-dir">Download directory</label>
+              <input
+                id="set-download-dir"
+                class="input"
+                type="text"
+                placeholder="/path/to/downloads"
+                required
+              />
+              <span class="field__error" data-error-for="set-download-dir" hidden></span>
+            </div>
+
+            <label class="field__check">
+              <input id="set-auto-categorize" type="checkbox" />
+              <span>Auto-sort completed downloads into category folders</span>
+            </label>
+          </fieldset>
+
+          <fieldset class="settings__group glass-panel">
+            <legend class="settings__legend">Categories</legend>
+            <p class="view__hint">
+              One category per row. Comma-separate extensions (e.g. .mp4, .mkv).
+            </p>
+            <div class="categories" id="categories-list"></div>
+            <button class="btn-ghost btn-ghost--sm" type="button" id="add-category">+ Add category</button>
+            <span class="field__error" data-error-for="categories" hidden></span>
+          </fieldset>
+
+          <fieldset class="settings__group glass-panel">
+            <legend class="settings__legend">External tools</legend>
+
+            <div class="field">
+              <label class="field__label" for="set-ytdlp-path">yt-dlp path</label>
+              <input
+                id="set-ytdlp-path"
+                class="input"
+                type="text"
+                placeholder="System PATH (leave blank to auto-detect)"
+              />
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="set-ffmpeg-path">ffmpeg path</label>
+              <input
+                id="set-ffmpeg-path"
+                class="input"
+                type="text"
+                placeholder="System PATH (leave blank to auto-detect)"
+              />
+            </div>
+          </fieldset>
+
+          <div class="settings__actions">
+            <button class="btn-ghost" type="button" id="settings-reload">Reload</button>
+            <button class="btn-primary" type="submit" id="settings-save">Save settings</button>
+          </div>
+        </form>
+      </section>
     </main>
+
+    <!-- ─── Floating action button ─────────────────────────────────────── -->
+    <button class="fab" id="fab" type="button" title="Add download" aria-label="Add download">
+      +
+    </button>
+
+    <!-- ─── Status bar ─────────────────────────────────────────────────── -->
+    <footer class="status-bar" id="status-bar">
+      <span class="status-bar__speed" id="status-speed">↓ 0 B/s</span>
+      <span class="status-bar__divider"></span>
+      <span id="status-active">0 active</span>
+      <span class="status-bar__divider"></span>
+      <span id="status-queued">0 queued</span>
+      <span class="status-bar__spacer"></span>
+      <button class="btn-ghost btn-ghost--sm" id="pause-all" type="button">⏸ Pause All</button>
+      <button class="btn-ghost btn-ghost--sm" id="resume-all" type="button">▶ Resume All</button>
+    </footer>
+
+    <!-- ─── Add Download modal ─────────────────────────────────────────── -->
+    <div class="modal-backdrop" id="add-modal" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
+        <h2 class="modal__title" id="add-modal-title">Add Download</h2>
+        <form id="add-form" class="modal__form">
+          <input
+            id="url-input"
+            class="input"
+            type="url"
+            placeholder="Paste a download URL…"
+            autocomplete="off"
+            required
+          />
+          <div class="field">
+            <label class="field__label" for="filename-input">Filename (optional)</label>
+            <input
+              id="filename-input"
+              class="input"
+              type="text"
+              placeholder="Override the detected filename"
+              autocomplete="off"
+            />
+          </div>
+          <div class="field">
+            <label class="field__label" for="segments-input">
+              Segments: <span id="segments-value">4</span>
+            </label>
+            <input
+              id="segments-input"
+              class="range"
+              type="range"
+              min="1"
+              max="32"
+              step="1"
+              value="4"
+            />
+            <span class="field__hint">More segments can be faster, 1–32.</span>
+          </div>
+          <div class="modal__actions">
+            <button class="btn-ghost" type="button" id="add-cancel">Cancel</button>
+            <button class="btn-primary" type="submit">Download</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ─── Toast notifications ────────────────────────────────────────── -->
+    <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="false"></div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

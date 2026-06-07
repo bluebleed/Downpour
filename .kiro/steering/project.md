@@ -17,6 +17,5 @@ commands, conventions, and the roadmap. Key points for Kiro:
   `http://127.0.0.1:53472` contract.
 - **Conventions**: `rustfmt` (edition 2021) + `clippy`; `anyhow::Result` in engine code,
   `String` errors at the Tauri command boundary.
-- **Responsible use**: only download content the user is allowed to access — no DRM/paywall
-  bypass, and respect site Terms of Service (e.g., most YouTube content is off-limits).
+
 - Don't run a full `tauri build` without a display/webview libraries; it builds on the user's machine.
