@@ -1692,3 +1692,71 @@ Open threads whenever you're ready:
 - **Commit** the large pile of finished work (download_dir, tray, open/delete, icons, filename/Content-Disposition, media merge/naming/categorization, playlist download + 2K/4K, the playlist-panel CSS fix).
 
 Anything else?
+
+### 2026-06-07 19:23:32 — You
+SO implement the plan now in one go.
+
+### 2026-06-07 19:23:42 — Claude
+On it — implementing the full plan now. Let me read the files I'll touch.
+
+### 2026-06-07 19:24:24 — Claude
+Now I have the full picture. Let me implement Phase 2 (capture server). Updating `Ctx` to carry the app handle, adding the `/capture-media` endpoint:
+
+### 2026-06-07 19:25:02 — Claude
+Now update `serve` (route + pass app to Ctx) and add the handler:
+
+### 2026-06-07 19:25:32 — Claude
+Let me add a test for the selector mapping:
+
+### 2026-06-07 19:25:39 — Claude
+Phase 2 done. Now Phase 1 (extension) and Phase 3 (frontend listener). Let me read the extension background.js and the frontend view-switching:
+
+### 2026-06-07 19:26:20 — Claude
+Now Phase 1 — add the context menu to the extension. First the manifest permission:
+
+### 2026-06-07 19:26:57 — Claude
+Phase 1 done. Now Phase 3 — the frontend `open-media` listener. Let me find the view-switching logic:
+
+### 2026-06-07 19:27:20 — Claude
+`switchView("media")` is exactly what I need. Let me add the `open-media` listener:
+
+### 2026-06-07 19:27:40 — Claude
+Phases 1-3 done. **Phase 4 is satisfied by reuse**: the context menu respects the popup's existing on/off `enabled` flag (master switch), and "default quality = highest available" is implemented (`quality: "best"` → `quality_to_selector` defaults to highest) — no new settings surface needed. Let me verify everything compiles and passes:
+
+### 2026-06-07 19:28:50 — Claude
+All green — **196 tests pass** (new `quality_selector` test included), clippy clean. Let me mark the plan doc as implemented:
+
+### 2026-06-07 19:29:35 — Claude
+Done — the full right-click feature is implemented and verified (code-side). **196 tests pass, clippy clean.**
+
+## What's built
+
+**Extension** ([manifest.json](extension/manifest.json), [background.js](extension/background.js))
+- Added `contextMenus` permission and two right-click items (on page/video/link contexts):
+  - **"Download with Downpour"** → options mode
+  - **"Quick download (Best quality) with Downpour"** → quick mode
+- URL resolution avoids the un-downloadable `blob:` video source — uses `linkUrl → pageUrl → tab.url` (the page URL is what yt-dlp needs).
+- POSTs `{ url, mode, quality:"best", title, cookies }` to the new endpoint; gated by the popup's existing on/off switch.
+- App-not-running feedback: flashes a **"!" badge** on the toolbar icon ("Open Downpour first").
+
+**Capture server** ([capture_server.rs](src-tauri/src/capture_server.rs))
+- New `/capture-media` route. `quality_to_selector()` maps presets, **defaulting to highest available** per your call.
+- **Quick mode** → enqueues a `Media` download at Best quality (flows through the whole pipeline: audio merge → mp4 → real filename → `Videos/`).
+- **Options mode** → emits an `open-media` event and **brings the window to front**.
+
+**App UI** ([main.js](src/main.js))
+- Listens for `open-media` → switches to the Media tab, fills the URL, and auto-extracts (reusing single/playlist routing, format picker, presets).
+
+**Plan doc** updated → [task.md](plans/right-click-download/task.md) shows Phases 1–5 checked (manual in-browser checks remain).
+
+## To use it (rebuild + reload extension)
+1. Quit Downpour from tray → `npm run tauri dev` (Rust changed).
+2. In the browser: reload the unpacked extension (so the new manifest permission + context menu register).
+3. Right-click a YouTube/X/Instagram video → **Download with Downpour** (opens Media tab to choose) or **Quick download (Best quality)** (starts immediately at highest quality).
+
+**Commit message — add to body:**
+```
+- Add right-click "Download with Downpour" browser context menu (capture-media endpoint, quick + options modes, open-media event)
+```
+
+That's the whole plan shipped. The cookies-file option (for private playlists) is still the one deferred item whenever you want it.

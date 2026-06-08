@@ -16,7 +16,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::downloader;
@@ -37,7 +37,12 @@ const MAX_BIND_RETRIES: u32 = 5;
 #[derive(Clone)]
 struct Ctx {
     queue: QueueManager,
+    app: AppHandle,
 }
+
+/// Event emitted to the UI when the extension asks to open a media URL in the
+/// Media tab (the right-click "Download with Downpour" → with-options flow).
+const OPEN_MEDIA_EVENT: &str = "open-media";
 
 /// Payload POSTed by the browser extension to `/capture`.
 ///
@@ -75,11 +80,56 @@ struct CaptureReq {
     is_media: Option<bool>,
 }
 
+/// Payload POSTed by the extension's right-click menu to `/capture-media`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureMediaReq {
+    /// The media page / video URL (required).
+    url: String,
+    /// `"quick"` (enqueue immediately) or `"options"` (open the Media tab).
+    #[serde(default)]
+    mode: Option<String>,
+    /// Quality preset keyword for quick mode (defaults to highest available).
+    #[serde(default)]
+    quality: Option<String>,
+    /// Optional page/video title for a friendly display name while downloading.
+    #[serde(default)]
+    title: Option<String>,
+    /// Cookie header scoped to the page domain, when the extension supplies it.
+    #[serde(default)]
+    cookies: Option<String>,
+}
+
+/// Map a quality preset keyword to a yt-dlp format selector. Unknown/empty
+/// defaults to the highest available quality. Mirrors the Media-tab presets.
+pub fn quality_to_selector(quality: Option<&str>) -> String {
+    let capped = |h: u32| {
+        format!(
+            "bestvideo[height<={h}]+bestaudio[ext=m4a]/bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"
+        )
+    };
+    match quality.unwrap_or("best").trim() {
+        "2160" => capped(2160),
+        "1440" => capped(1440),
+        "1080" => capped(1080),
+        "720" => capped(720),
+        "audio" => "bestaudio[ext=m4a]/bestaudio".to_string(),
+        _ => "bestvideo+bestaudio/best".to_string(),
+    }
+}
+
 /// Success response for a captured download (Req 9.3).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CaptureResp {
     id: String,
+    status: &'static str,
+}
+
+/// Response for a media capture that was opened in the app (options mode).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenedResp {
     status: &'static str,
 }
 
@@ -160,11 +210,15 @@ pub fn build_captured_item(
 }
 
 pub async fn serve(app: AppHandle, queue: QueueManager) -> anyhow::Result<()> {
-    let ctx = Ctx { queue };
+    let ctx = Ctx {
+        queue,
+        app: app.clone(),
+    };
 
     let router = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/capture", post(capture))
+        .route("/capture-media", post(capture_media))
         // Allows the extension (different origin) to POST here.
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(ctx);
@@ -310,6 +364,75 @@ async fn capture(
     }
 }
 
+/// Handle a `/capture-media` POST from the extension's right-click menu.
+///
+/// - `mode: "options"` (default UX) → emit an `open-media` event so the app opens
+///   the URL in the Media tab (format picker / playlist), and focus the window.
+/// - `mode: "quick"` → enqueue a `Media` download immediately using the quality
+///   preset (defaults to the highest available), routed through yt-dlp.
+async fn capture_media(
+    State(ctx): State<Ctx>,
+    payload: Result<Json<CaptureMediaReq>, JsonRejection>,
+) -> Response {
+    let req = match payload {
+        Ok(Json(req)) => req,
+        Err(rejection) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                format!("malformed media-capture request: {rejection}"),
+            );
+        }
+    };
+
+    if let Err(reason) = validate_capture_url(&req.url) {
+        return error(StatusCode::BAD_REQUEST, reason);
+    }
+
+    let quick = req.mode.as_deref() == Some("quick");
+
+    // Bring the app to the front so the user sees what happened.
+    if let Some(window) = ctx.app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+
+    if !quick {
+        // Hand the URL to the Media tab for the full extract / format / playlist UI.
+        let _ = ctx.app.emit(OPEN_MEDIA_EVENT, req.url.clone());
+        return Json(OpenedResp { status: "opened" }).into_response();
+    }
+
+    // Quick download: enqueue a Media item at the requested (default: best) quality.
+    let id = uuid::Uuid::new_v4().to_string();
+    let display = req
+        .title
+        .as_ref()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "Media download".to_string());
+
+    let mut item = DownloadItem::new(id, req.url.clone(), display);
+    item.download_type = DownloadType::Media;
+    item.media_format_id = Some(quality_to_selector(req.quality.as_deref()));
+    item.output_template = Some("%(title)s.%(ext)s".to_string());
+    item.total_size = 100;
+    item.cookies = req.cookies.clone();
+
+    match ctx.queue.enqueue(item).await {
+        Ok(id) => Json(CaptureResp {
+            id,
+            status: "queued",
+        })
+        .into_response(),
+        Err(e) => error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to enqueue media download: {e}"),
+        ),
+    }
+}
+
 /// Build a JSON error [`Response`] with the given status code and message.
 fn error(code: StatusCode, message: String) -> Response {
     (code, Json(ErrorResp { error: message })).into_response()
@@ -382,6 +505,26 @@ mod tests {
         assert!(url.chars().count() > MAX_URL_LEN);
         let err = validate_capture_url(&url).unwrap_err();
         assert!(err.contains("maximum length"), "got: {err}");
+    }
+
+    #[test]
+    fn quality_selector_maps_presets() {
+        assert_eq!(
+            quality_to_selector(Some("best")),
+            "bestvideo+bestaudio/best"
+        );
+        assert_eq!(quality_to_selector(None), "bestvideo+bestaudio/best");
+        assert_eq!(
+            quality_to_selector(Some("audio")),
+            "bestaudio[ext=m4a]/bestaudio"
+        );
+        assert!(quality_to_selector(Some("2160")).contains("height<=2160"));
+        assert!(quality_to_selector(Some("1080")).contains("height<=1080"));
+        // Unknown keyword falls back to highest available.
+        assert_eq!(
+            quality_to_selector(Some("weird")),
+            "bestvideo+bestaudio/best"
+        );
     }
 
     // ── Port bind backoff (Req 9.5) ──────────────────────────────────────────────

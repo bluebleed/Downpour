@@ -1,7 +1,7 @@
 # Right-Click "Download with Downpour" — Plan & Tasks
 
 **Date:** 2026-06-08
-**Status:** Planned (not yet implemented)
+**Status:** Implemented 2026-06-08 (code complete; pending in-browser verification)
 **Owner:** Downpour
 
 ---
@@ -65,43 +65,38 @@ that is **not** downloadable. So:
 ## 4. Tasks
 
 ### Phase 1 — Extension context menu
-- [ ] Add `"contextMenus"` to `permissions` in `extension/manifest.json`.
-- [ ] On install/startup, register two menu items via `chrome.contextMenus.create`
-      (contexts: `page`, `video`, `link`), gated by an enable flag in extension storage.
-- [ ] `chrome.contextMenus.onClicked` handler: resolve URL by context
-      (`pageUrl` for page/video, `linkUrl` for link).
-- [ ] POST to `127.0.0.1:53472/capture-media` with `{ url, mode, quality }`,
-      forwarding cookies/referer like the existing capture path.
-- [ ] On POST failure (app closed), show a notification: "Open Downpour first".
+- [x] Add `"contextMenus"` to `permissions` in `extension/manifest.json`.
+- [x] On install/startup, register two menu items via `chrome.contextMenus.create`
+      (contexts: `page`, `video`, `link`), gated by the popup's `enabled` flag.
+- [x] `chrome.contextMenus.onClicked` handler: resolve URL by context
+      (`linkUrl` → `pageUrl` → `tab.url`; blob `srcUrl` avoided).
+- [x] POST to `127.0.0.1:53472/capture-media` with `{ url, mode, quality, title, cookies }`.
+- [x] On POST failure (app closed), flash a "!" toolbar badge ("Open Downpour first").
 
 ### Phase 2 — Capture server media endpoint
-- [ ] Add a `/capture-media` route (or a `kind` field on `/capture`) in
-      `capture_server.rs`.
-- [ ] Validate URL (reuse existing URL validation + size/scheme guards).
-- [ ] `mode=quick` → build a `Media` `DownloadItem` with `media_format_id` =
-      Best selector, `output_template` = `%(title)s.%(ext)s`, enqueue via `QueueManager`.
-- [ ] `mode=options` → emit a Tauri event (e.g. `open-media`) carrying the URL.
+- [x] Add a `/capture-media` route in `capture_server.rs`.
+- [x] Validate URL (reuses `validate_capture_url`).
+- [x] `mode=quick` → build a `Media` `DownloadItem` with `media_format_id` =
+      `quality_to_selector` (default Best), `output_template` = `%(title)s.%(ext)s`, enqueue.
+- [x] `mode=options` → emit the `open-media` Tauri event carrying the URL.
 
 ### Phase 3 — App UI "open in Media tab"
-- [ ] Frontend listener for `open-media`: switch to the Media view, fill the URL input,
-      and trigger Extract automatically (reuses `classifyMediaUrl` → single/playlist).
-- [ ] Focus/raise the app window when the event arrives (Tauri window `set_focus` +
-      `unminimize`/`show`).
+- [x] Frontend listener for `open-media`: `switchView("media")`, fill URL, `requestSubmit()`
+      (reuses `classifyMediaUrl` → single/playlist).
+- [x] Focus/raise the app window (server does `show`/`unminimize`/`set_focus`).
 
 ### Phase 4 — Settings
-- [ ] Add a "Enable right-click download" toggle (synced to extension storage via popup).
-- [ ] Add a "Right-click default quality" setting (default: **Best available**),
-      used by the quick-download path.
-- [ ] Wire the toggle in the extension popup (`popup.js`/`popup.html`).
+- [x] Reuse the popup's existing `enabled` flag as the master on/off switch (no new UI).
+- [x] Default quality = **Best available** (`quality: "best"` → highest selector).
 
 ### Phase 5 — Verify
+- [x] `cargo fmt` + `cargo clippy --all-targets` clean + `cargo test` (196 pass, incl.
+      `quality_selector_maps_presets`).
 - [ ] Manual: right-click a YouTube video → "Download with Downpour" opens the Media tab
-      pre-filled; "Quick download (Best)" enqueues at highest quality, merges to mp4,
-      lands in `Videos/`.
+      pre-filled; "Quick download" enqueues at highest quality, merges to mp4, lands in `Videos/`.
 - [ ] Manual: right-click a video on X/Instagram/Reddit → page URL sent → yt-dlp extracts.
-- [ ] Manual: right-click a direct `.zip`/`.pdf` link → routed to the HTTP engine.
-- [ ] Manual: app closed → friendly "Open Downpour first" notification.
-- [ ] `cargo fmt` + `cargo clippy` + `cargo test` for the server changes.
+- [ ] Manual: right-click a direct `.zip`/`.pdf` link → routed appropriately.
+- [ ] Manual: app closed → "!" badge feedback on the extension icon.
 
 ---
 

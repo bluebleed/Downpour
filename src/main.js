@@ -1247,6 +1247,16 @@ function resetMediaForm() {
   setMediaStatus("");
 }
 
+/* The browser extension's right-click "Download with Downpour" (options mode)
+   hands the URL here: open the Media tab, fill it in, and auto-extract. */
+listen("open-media", (event) => {
+  const url = typeof event.payload === "string" ? event.payload : event.payload?.url;
+  if (!url) return;
+  switchView("media");
+  mediaUrl.value = url;
+  mediaForm.requestSubmit();
+});
+
 /* Render a media download card into the media view's own list. */
 function renderMediaRow(item) {
   if (item.downloadType && item.downloadType !== "media") return;

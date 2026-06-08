@@ -3,7 +3,7 @@
   "name": "Downpour Capture",
   "version": "0.1.0",
   "description": "Sends downloads from your browser to the Downpour app.",
-  "permissions": ["downloads", "cookies", "tabs", "storage"],
+  "permissions": ["downloads", "cookies", "tabs", "storage", "contextMenus"],
   "host_permissions": ["http://127.0.0.1:53472/*", "<all_urls>"],
   "background": {
     "service_worker": "background.js"
