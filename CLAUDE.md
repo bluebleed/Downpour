@@ -1,3 +1,11 @@
+---
+type: rule-pointer
+title: Project Rules Pointer
+created: 2026-06-07
+last-updated: 2026-07-02
+load-behavior: eager
+---
+
 # CLAUDE.md
 
 Guidance for Claude Code working in this repository.

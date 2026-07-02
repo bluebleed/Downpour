@@ -1,3 +1,11 @@
+---
+type: reference
+title: GEMINI.md
+created: 2026-06-07
+last-updated: 2026-07-02
+load-behavior: on-demand
+---
+
 # GEMINI.md
 
 Guidance for Antigravity (Google DeepMind) working in this repository.

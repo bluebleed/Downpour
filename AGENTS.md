@@ -1,3 +1,11 @@
+---
+type: rule-pointer
+title: Agent Rules Pointer
+created: 2026-06-07
+last-updated: 2026-07-02
+load-behavior: eager
+---
+
 # AGENTS.md
 
 Canonical guidance for AI coding agents working in this repository. (Tool-specific

@@ -1,3 +1,11 @@
+---
+type: reference
+title: Implementation Plan: IDM-Style Download Manager
+created: 2026-06-06
+last-updated: 2026-07-02
+load-behavior: on-demand
+---
+
 # Implementation Plan: IDM-Style Download Manager
 
 ## Overview

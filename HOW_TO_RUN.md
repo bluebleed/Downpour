@@ -1,3 +1,11 @@
+---
+type: reference
+title: Running Downpour
+created: 2026-06-07
+last-updated: 2026-07-02
+load-behavior: on-demand
+---
+
 # Running Downpour
 
 Downpour is a desktop download manager built with Tauri (a Rust core + a web UI).

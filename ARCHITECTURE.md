@@ -1,3 +1,11 @@
+---
+type: reference
+title: Downpour — Architecture & Permanent Design Decisions
+created: 2026-06-07
+last-updated: 2026-07-02
+load-behavior: on-demand
+---
+
 # Downpour — Architecture & Permanent Design Decisions
 
 > **Case B memory** (project-permanent). Updated when major architectural decisions are made.  

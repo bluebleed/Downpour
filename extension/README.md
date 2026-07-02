@@ -1,3 +1,13 @@
+---
+type: project-root
+title: Downpour Capture (browser extension)
+category: desktop-apps
+status: active
+created: 2026-06-05
+last-updated: 2026-07-02
+load-behavior: eager
+---
+
 # Downpour Capture (browser extension)
 
 Intercepts downloads in your browser and forwards them to the Downpour desktop

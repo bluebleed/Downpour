@@ -1,3 +1,11 @@
+---
+type: reference
+title: Right-Click "Download with Downpour" — Plan & Tasks
+created: 2026-06-08
+last-updated: 2026-07-02
+load-behavior: on-demand
+---
+
 # Right-Click "Download with Downpour" — Plan & Tasks
 
 **Date:** 2026-06-08

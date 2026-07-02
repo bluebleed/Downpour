@@ -1,4 +1,5 @@
 ---
+type: reference
 inclusion: always
 ---
 

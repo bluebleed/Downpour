@@ -1,3 +1,13 @@
+---
+type: project-root
+title: Downpour
+category: desktop-apps
+status: active
+created: 2026-06-05
+last-updated: 2026-07-02
+load-behavior: eager
+---
+
 # Downpour
 
 A fast, universal (macOS · Windows · Linux) download manager — an IDM-style app for personal use.

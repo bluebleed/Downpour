@@ -1,3 +1,11 @@
+---
+type: reference
+title: Requirements Document
+created: 2026-06-05
+last-updated: 2026-07-02
+load-behavior: on-demand
+---
+
 # Requirements Document
 
 ## Introduction

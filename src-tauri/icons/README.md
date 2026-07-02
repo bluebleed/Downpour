@@ -1,3 +1,13 @@
+---
+type: project-root
+title: App icons
+category: desktop-apps
+status: active
+created: 2026-06-05
+last-updated: 2026-07-02
+load-behavior: eager
+---
+
 # App icons
 
 Tauri needs icon files here before `dev`/`build` will run. Generate them from a
