@@ -15,3 +15,10 @@ All 17 task groups are marked `[x]`. The project is a functioning download manag
 1. ~~**Wire `AppSettings.download_dir` to `downloader.rs`**~~ ✅ DONE (June 2026). Configured dir flows settings → QueueConfig → QueueManager live `RwLock<PathBuf>` → `dest_dir` through the engine. `downloads_dir()` is now fallback-only. See ARCHITECTURE.md.
 2. ~~**"Resume All on Startup" UX**~~ ✅ DONE (June 2026). New `AppSettings.resume_on_startup` (default off); `lib.rs` calls `resume_all()` after restore when enabled. UI toggle added to Settings view.
 3. **System tray**: `tauri-plugin-notification` is registered but tray minimize not implemented. ⚠️ Needs a full app build to verify — best done on the user's machine (no display/webview in agent env).
+4. **Test the UI end-to-end**: Run the app and verify all 4 views work (Downloads, Queue, Media, Settings).
+5. **Extension needs loading**: Load `extension/` as unpacked extension in Chrome to test capture flow.
+6. **Expand `extension/content.js`** media detection for more platforms.
+## Critical gotchas
+- Don't run `npm run tauri build` without a display/WebView — only run in dev mode here.
+- `DownloadItem` serde uses `camelCase` — frontend JS expects camelCase field names.
+- The `queue.rs` scheduler is **suspended after restore** — `suspended` AtomicBool = true.

@@ -1760,3 +1760,48 @@ Done — the full right-click feature is implemented and verified (code-side). *
 ```
 
 That's the whole plan shipped. The cookies-file option (for private playlists) is still the one deferred item whenever you want it.
+
+## Session 850a3faa — Claude Code — 2026-07-05 16:58:50
+
+### 2026-07-05 16:58:50 — You
+why so  much space this app is taking, improve the app, make it better. make the plan that opus can follow
+
+### 2026-07-05 16:58:57 — Claude
+I'll start by reading the required workspace rules and context, then investigate what's eating disk space in the Downpour project.
+
+### 2026-07-05 17:01:09 — Claude
+While the disk scan runs, let me look at the project structure.
+
+### 2026-07-05 17:05:26 — Claude
+While that runs, let me look at the config that affects build size and the roadmap for the improvement plan.
+
+### 2026-07-05 17:08:03 — Claude
+The picture is complete. Now I'll write the plan document in [plans/](plans/) following the same format as the existing right-click plan.
+
+### 2026-07-05 17:09:48 — Claude
+Saved to Active Sprint Memory (the script auto-archived the oldest entries to `context/ARCHIVE_MEMORY.md` to stay under its cap — normal behavior).
+
+## Why the app is taking 13 GB
+
+The app itself is tiny (~60 MB including `node_modules`). **99.5% of the space is `src-tauri/target/debug/`** — Rust's build cache, which is already gitignored and fully regenerable:
+
+| What | Size |
+|---|---|
+| Compiled dependencies with full debug info ([target/debug/deps](src-tauri/target/debug/)) | 7.0 GB |
+| Incremental-compilation caches (grow with every rebuild) | 4.5 GB |
+| Build-script outputs | 0.6 GB |
+
+The cause: heavy dependencies (Tauri, Tokio `full`, reqwest, axum) get compiled with full debuginfo by default, and incremental caches pile up across dev sessions. Nobody debugs *inside* those dependency crates, so almost all of that is waste. There's also minor repo bloat: a 6.3 MB `Logo 2.png` and two `test_out*.txt` files committed at the repo root.
+
+## The plan for Opus
+
+Written to [plans/space-cleanup-and-improvements/task.md](plans/space-cleanup-and-improvements/task.md), four independently shippable phases:
+
+1. **Phase 1 — Reclaim the 13 GB**: add `debug = "line-tables-only"` + `[profile.dev.package."*"] debug = false` to [Cargo.toml](src-tauri/Cargo.toml), then `cargo clean`. Steady-state should drop to ~2–4 GB. (Release profile is already well-tuned; untouched.)
+2. **Phase 2 — Repo hygiene**: remove committed test outputs, move/shrink the 6.3 MB logo into `assets/`, fix stale sprint memory.
+3. **Phase 3 — Finish the roadmap**: system tray + minimize-to-tray (the last big open TODO), in-browser verification of the right-click feature (it *is* implemented — commit `7a47952` — just unverified), and broader `content.js` media detection.
+4. **Phase 4 — Make it better**: search/status filter in the Downloads view, batch URL add, opt-in clipboard URL watcher — ordered by value per line of code.
+
+The plan includes the executor constraints (stable `DownloadItem` event contract, fmt/clippy/tests after Rust changes, no headless `tauri build`, responsible-use boundary) and a per-phase verification checklist.
+
+**Quick win you can run right now** (before Opus even starts): `cargo clean --manifest-path src-tauri/Cargo.toml` frees ~13 GB instantly — the only cost is one full rebuild (a few minutes) on your next `npm run tauri dev`. Ideally apply the Phase 1 Cargo.toml edit first so the cache doesn't regrow to 13 GB.
