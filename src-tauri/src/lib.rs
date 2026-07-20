@@ -796,13 +796,19 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let flag = minimize_to_tray.clone();
                 let win = window.clone();
-                window.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { api, .. } = event {
+                window.on_window_event(move |event| match event {
+                    WindowEvent::CloseRequested { api, .. } => {
                         if flag.load(Ordering::SeqCst) {
                             api.prevent_close();
                             let _ = win.hide();
                         }
                     }
+                    WindowEvent::Minimized => {
+                        if flag.load(Ordering::SeqCst) {
+                            let _ = win.hide();
+                        }
+                    }
+                    _ => {}
                 });
             }
 
