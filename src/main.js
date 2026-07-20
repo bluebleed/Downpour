@@ -743,25 +743,49 @@ listen("download-progress", (event) => {
 
 // Ordered queue summaries when the queue changes (Req 12.3). Each summary has
 // { id, filename, status, position }. Reconcile statuses and re-render cards.
-listen("queue-changed", (event) => {
+listen("queue-changed", async (event) => {
   const summaries = event.payload || [];
   const seen = new Set();
+  let needsHydrate = false;
   for (const summary of summaries) {
     seen.add(summary.id);
-    const existing = items.get(summary.id) || {};
-    const merged = { ...existing, ...summary };
-    items.set(summary.id, merged);
-    // Keep the card's status badge / actions in sync with the queue.
-    if (rows.has(summary.id)) {
+    if (!items.has(summary.id)) {
+      needsHydrate = true;
+    }
+  }
+
+  if (needsHydrate) {
+    try {
+      const existing = await invoke("list_downloads");
+      existing.forEach((item) => {
+        renderRow(item);
+        upsertItem(item);
+        const summary = summaries.find((s) => s.id === item.id);
+        if (summary) {
+          const merged = { ...item, ...summary };
+          items.set(item.id, merged);
+          renderRow(merged);
+        }
+      });
+    } catch (_) {}
+  } else {
+    for (const summary of summaries) {
+      const existing = items.get(summary.id) || {};
+      const merged = { ...existing, ...summary };
+      items.set(summary.id, merged);
       renderRow(merged);
     }
   }
-  // Drop items (and their cards) no longer present in the queue.
+
+  // Drop items (and their cards) no longer present in the queue, unless they are completed/errored.
   for (const id of [...items.keys()]) {
     if (!seen.has(id)) {
-      items.delete(id);
-      rows.get(id)?.remove();
-      rows.delete(id);
+      const item = items.get(id);
+      if (item && item.status !== "complete" && item.status !== "error") {
+        items.delete(id);
+        rows.get(id)?.remove();
+        rows.delete(id);
+      }
     }
   }
   if (rows.size === 0) showEmptyState();
@@ -1290,6 +1314,7 @@ playlistDownloadBtn.addEventListener("click", async () => {
     });
     (items || []).forEach((item) => {
       renderMediaRow(item);
+      renderRow(item);
       upsertItem(item);
     });
     showToast(`Queued ${items?.length ?? entries.length} downloads`, "success");
@@ -1319,6 +1344,7 @@ mediaDownloadBtn.addEventListener("click", async () => {
     if (mediaCurrentTitle) args.title = mediaCurrentTitle;
     const item = await invoke("start_media_download", args);
     renderMediaRow(item);
+    renderRow(item);
     upsertItem(item);
     showToast(`Started media download: ${item.filename || mediaCurrentUrl}`, "success");
     // The extraction form has done its job — reset it so the screen is clean and

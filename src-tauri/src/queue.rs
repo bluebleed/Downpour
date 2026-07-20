@@ -775,7 +775,14 @@ impl QueueManager {
             while let Some(progress) = rx.recv().await {
                 let mut map = downloads_progress.lock().await;
                 if let Some(it) = map.get_mut(&id_progress) {
-                    it.downloaded = progress.percent.round().clamp(0.0, 100.0) as u64;
+                    if let Some(total_bytes) = progress.total_bytes {
+                        it.total_size = total_bytes;
+                        it.downloaded =
+                            ((progress.percent / 100.0) * total_bytes as f64).round() as u64;
+                    } else {
+                        it.total_size = 100;
+                        it.downloaded = progress.percent.round().clamp(0.0, 100.0) as u64;
+                    }
                     it.speed = progress.speed_bps.unwrap_or(0);
                     it.eta = progress.eta_secs;
                     let snapshot = it.clone();
@@ -786,7 +793,7 @@ impl QueueManager {
         });
 
         let outcome = extractor
-            .download(&url, &format_id, &output_path, tx, cancel)
+            .download(&url, &format_id, &output_path, tx, cancel.clone())
             .await;
 
         // Stop the progress forwarder and drop the cancel token.
@@ -836,14 +843,22 @@ impl QueueManager {
                         }
                     }
                     None => {
-                        let err = match &outcome {
-                            Err(e) => format!("{e:#}"),
-                            Ok(_) => String::new(),
-                        };
-                        it.status = DownloadStatus::Error;
-                        it.error_message = Some(err);
-                        it.speed = 0;
-                        it.eta = None;
+                        if cancel.is_cancelled() {
+                            if it.status != DownloadStatus::Paused {
+                                it.status = DownloadStatus::Paused;
+                            }
+                            it.speed = 0;
+                            it.eta = None;
+                        } else {
+                            let err = match &outcome {
+                                Err(e) => format!("{e:#}"),
+                                Ok(_) => String::new(),
+                            };
+                            it.status = DownloadStatus::Error;
+                            it.error_message = Some(err);
+                            it.speed = 0;
+                            it.eta = None;
+                        }
                     }
                 }
                 let snapshot = it.clone();

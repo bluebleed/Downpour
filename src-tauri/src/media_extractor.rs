@@ -170,6 +170,8 @@ pub struct MediaProgress {
     pub speed_bps: Option<u64>,
     /// Estimated seconds remaining, when reported.
     pub eta_secs: Option<u64>,
+    /// Total size in bytes, when reported.
+    pub total_bytes: Option<u64>,
 }
 
 // ─── Pure helpers (unit/property testable, no I/O) ────────────────────────────
@@ -265,6 +267,14 @@ pub fn parse_progress_line(line: &str) -> Option<MediaProgress> {
     let mut percent: Option<f64> = None;
     let mut speed_bps: Option<u64> = None;
     let mut eta_secs: Option<u64> = None;
+    let mut total_bytes: Option<u64> = None;
+
+    if let Some(of_idx) = tokens.iter().position(|&t| t == "of") {
+        if let Some(size_tok) = tokens.get(of_idx + 1) {
+            let normalized = size_tok.strip_prefix('~').unwrap_or(size_tok);
+            total_bytes = parse_size_to_bytes(normalized);
+        }
+    }
 
     for (i, tok) in tokens.iter().enumerate() {
         if percent.is_none() {
@@ -290,6 +300,7 @@ pub fn parse_progress_line(line: &str) -> Option<MediaProgress> {
         percent,
         speed_bps,
         eta_secs,
+        total_bytes,
     })
 }
 
@@ -1018,6 +1029,7 @@ mod tests {
         assert_eq!(p.percent, 10.5);
         assert_eq!(p.speed_bps, Some((2.5 * 1024.0 * 1024.0) as u64));
         assert_eq!(p.eta_secs, Some(42));
+        assert_eq!(p.total_bytes, Some(104_857_600));
     }
 
     #[test]
@@ -1025,6 +1037,7 @@ mod tests {
         let p = parse_progress_line("[download] 100% of 1.00MiB in 00:01").expect("should parse");
         assert_eq!(p.percent, 100.0);
         assert_eq!(p.eta_secs, None);
+        assert_eq!(p.total_bytes, Some(1_048_576));
     }
 
     #[test]
@@ -1034,6 +1047,7 @@ mod tests {
         assert_eq!(p.percent, 50.0);
         assert_eq!(p.speed_bps, None);
         assert_eq!(p.eta_secs, None);
+        assert_eq!(p.total_bytes, Some(5_242_880));
     }
 
     #[test]
@@ -1041,6 +1055,7 @@ mod tests {
         let p = parse_progress_line("[download]  1.0% of 1.00GiB at 1.00MiB/s ETA 01:02:03")
             .expect("should parse");
         assert_eq!(p.eta_secs, Some(3723));
+        assert_eq!(p.total_bytes, Some(1_073_741_824));
     }
 
     #[test]
