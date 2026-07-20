@@ -613,6 +613,14 @@ fn spawn_completion_notifier(app: tauri::AppHandle, settings: SettingsState) {
     });
 }
 
+#[tauri::command]
+async fn hide_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ─── System tray ─────────────────────────────────────────────────────────────────
 
 /// Build the system tray icon with Show, Hide, Pause All, Resume All, and Quit.
@@ -796,19 +804,13 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let flag = minimize_to_tray.clone();
                 let win = window.clone();
-                window.on_window_event(move |event| match event {
-                    WindowEvent::CloseRequested { api, .. } => {
+                window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
                         if flag.load(Ordering::SeqCst) {
                             api.prevent_close();
                             let _ = win.hide();
                         }
                     }
-                    WindowEvent::Minimized => {
-                        if flag.load(Ordering::SeqCst) {
-                            let _ = win.hide();
-                        }
-                    }
-                    _ => {}
                 });
             }
 
@@ -847,6 +849,7 @@ pub fn run() {
             extract_playlist_info,
             start_media_batch,
             cancel_media_download,
+            hide_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Downpour");

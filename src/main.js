@@ -734,6 +734,18 @@ function showEmptyState() {
 }
 
 /* ─── Core events ─────────────────────────────────────────────────────── */
+// Intercept native minimize event to hide the window to tray when minimizeToTray is enabled.
+listen("tauri://minimized", async () => {
+  const settings = await invoke("get_settings");
+  if (settings && settings.minimizeToTray) {
+    try {
+      await invoke("hide_window");
+    } catch (e) {
+      console.error("failed to hide window on minimize:", e);
+    }
+  }
+});
+
 // Full DownloadItem state during a download (Req 12.1).
 listen("download-progress", (event) => {
   const item = event.payload;
