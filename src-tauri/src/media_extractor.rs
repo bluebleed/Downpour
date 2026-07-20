@@ -801,20 +801,27 @@ impl MediaExtractor {
         let stderr_tail: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
         let stderr_tail2 = stderr_tail.clone();
         let stderr_task = tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            let mut reader = BufReader::new(stderr);
+            let mut buf = Vec::new();
+            while let Ok(n) = reader.read_until(b'\n', &mut buf).await {
+                if n == 0 {
+                    break;
+                }
+                let line = String::from_utf8_lossy(&buf).trim().to_string();
                 let mut q = stderr_tail2.lock().await;
                 if q.len() == STDERR_TAIL_LINES {
                     q.pop_front();
                 }
                 q.push_back(line);
+                buf.clear();
             }
         });
 
         // Read stdout progress lines, throttling forwarded events to 3/sec, and
         // track the output path yt-dlp announces so the caller learns the real
         // filename (a `[Merger]`/`[ExtractAudio]` line supersedes `Destination`).
-        let mut lines = BufReader::new(stdout).lines();
+        let mut reader = BufReader::new(stdout);
+        let mut buf = Vec::new();
         let mut last_emit: Option<Instant> = None;
         let mut destination: Option<String> = None;
         let mut final_output: Option<String> = None;
@@ -828,10 +835,13 @@ impl MediaExtractor {
                     let _ = tokio::fs::remove_file(&path_out_file).await;
                     return Err(anyhow!("media download cancelled"));
                 }
-                next = lines.next_line() => {
-                    match next {
-                        Ok(Some(line)) => {
-                            if let Some(progress) = parse_progress_line(&line) {
+                res = reader.read_until(b'\n', &mut buf) => {
+                    match res {
+                        Ok(0) => break, // EOF
+                        Ok(_) => {
+                            let line = String::from_utf8_lossy(&buf);
+                            let line_str = line.trim();
+                            if let Some(progress) = parse_progress_line(line_str) {
                                 let now = Instant::now();
                                 let due = last_emit
                                     .map(|t| now.duration_since(t) >= PROGRESS_INTERVAL)
@@ -841,15 +851,18 @@ impl MediaExtractor {
                                     // A closed receiver should not abort the download.
                                     let _ = progress_tx.send(progress).await;
                                 }
-                            } else if let Some(out) = parse_output_line(&line) {
+                            } else if let Some(out) = parse_output_line(line_str) {
                                 match out {
                                     OutputLine::Final(p) => final_output = Some(p),
                                     OutputLine::Destination(p) => destination = Some(p),
                                 }
                             }
+                            buf.clear();
                         }
-                        Ok(None) => break, // EOF: process closed stdout
-                        Err(_) => break,
+                        Err(_) => {
+                            buf.clear();
+                            // Non-fatal read error or invalid UTF-8, ignore and continue
+                        }
                     }
                 }
             }
