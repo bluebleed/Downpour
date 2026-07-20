@@ -19,6 +19,11 @@ const list = document.querySelector("#downloads");
 
 const toastContainer = document.querySelector("#toast-container");
 
+const sidebarAddBtn = document.querySelector("#sidebar-add-btn");
+const headerAddBtn = document.querySelector("#header-add-btn");
+const headerSpeedVal = document.querySelector("#header-speed-val");
+const headerActiveBadge = document.querySelector("#header-active-badge");
+
 const statusSpeed = document.querySelector("#status-speed");
 const statusActive = document.querySelector("#status-active");
 const statusQueued = document.querySelector("#status-queued");
@@ -301,6 +306,8 @@ async function checkClipboardForDownloadUrl() {
 setInterval(checkClipboardForDownloadUrl, 1500);
 
 fab.addEventListener("click", openModal);
+if (sidebarAddBtn) sidebarAddBtn.addEventListener("click", openModal);
+if (headerAddBtn) headerAddBtn.addEventListener("click", openModal);
 addCancel.addEventListener("click", closeModal);
 addModal.addEventListener("click", (e) => {
   if (e.target === addModal) closeModal();
@@ -437,6 +444,45 @@ function actionsFor(status) {
   }
 }
 
+function bottomActionsFor(status) {
+  switch (status) {
+    case "downloading":
+    case "merging":
+    case "queued":
+      return [
+        { action: "pause", label: "Pause" },
+        { action: "cancel", label: "Cancel" },
+      ];
+    case "paused":
+      return [
+        { action: "resume", label: "Resume" },
+        { action: "cancel", label: "Cancel" },
+      ];
+    case "error":
+      return [
+        { action: "resume", label: "Retry" },
+        { action: "cancel", label: "Remove" },
+      ];
+    case "complete":
+      return [
+        { action: "open", label: "Open" },
+        { action: "reveal", label: "Folder" },
+        { action: "delete", label: "Delete" },
+      ];
+    default:
+      return [{ action: "cancel", label: "Cancel" }];
+  }
+}
+
+function bottomActionsHtml(status) {
+  return bottomActionsFor(status)
+    .map(
+      (a) =>
+        `<button class="btn-card-action btn-card-action--${a.action}" type="button" data-action="${a.action}">${a.label}</button>`,
+    )
+    .join("");
+}
+
 function actionButtonsHtml(status) {
   return actionsFor(status)
     .map(
@@ -481,31 +527,37 @@ function renderRow(item) {
   const dateText = humanDateTime(tsSecs);
   const dateLabel = isComplete ? "Completed" : "Added";
 
+  const titleSizeText = item.totalSize > 0 ? ` (${humanSize(item.totalSize)})` : "";
+  const activeStatusText = status === "downloading" ? ` - [Active: ${sizeText}]` : "";
+  const cardTitleText = `${item.filename}${titleSizeText}${activeStatusText}`;
+
   li.innerHTML = `
     <div class="download-card__head">
-      <span class="download-card__icon" aria-hidden="true">${fileIcon(item)}</span>
-      <span class="download-card__filename" title="${escapeHtml(item.url)}">${escapeHtml(item.filename)}</span>
-      ${showSpeed ? `<span class="download-card__speed">↓ ${humanSpeed(item.speed)}</span>` : ""}
-      <span class="badge badge--${status}">${STATUS_GLYPHS[status] || ""} ${status}</span>
+      <div class="download-card__title-row">
+        <span class="download-card__icon" aria-hidden="true">${fileIcon(item)}</span>
+        <span class="download-card__filename" title="${escapeHtml(item.url)}">${escapeHtml(cardTitleText)}</span>
+      </div>
+      <div class="download-card__badge-row">
+        <span class="badge badge--${status}">${STATUS_GLYPHS[status] || ""} ${status}</span>
+        <span class="download-card__actions-top">${actionButtonsHtml(status)}</span>
+      </div>
       <span class="download-card__inline-meta">${pct}% · ${sizeText}</span>
-      <span class="download-card__actions">${actionButtonsHtml(status)}</span>
     </div>
     <div class="progress-bar">
-      <div class="progress-bar__fill progress-bar__fill--${status}" style="width:${pct}%"></div>
+      <div class="progress-bar__fill progress-bar__fill--${status}" style="width:${pct}%">
+        ${pct > 0 ? `<span class="progress-bar__badge">${pct}%</span>` : ""}
+      </div>
     </div>
     <div class="download-card__meta">
-      <span class="download-card__size">${sizeText}</span>
-      <span class="download-card__pct">${pct}%</span>
-      ${status === "downloading" && item.eta != null ? `<span class="download-card__eta">ETA ${humanEta(item.eta)}</span>` : ""}
-      <span class="download-card__meta-spacer"></span>
-      ${dateText ? `<span class="download-card__date" title="${dateLabel}">${dateLabel} ${escapeHtml(dateText)}</span>` : ""}
-      ${
-        status === "error" && item.errorMessage
-          ? `<span class="download-card__error" title="${escapeHtml(item.errorMessage)}">${escapeHtml(item.errorMessage)}</span>`
-          : item.category
-            ? `<span class="download-card__category">${escapeHtml(item.category)}</span>`
-            : ""
-      }
+      <div class="download-card__stats">
+        ${showSpeed ? `<span class="download-card__speed">${humanSpeed(item.speed)}</span>` : ""}
+        ${status === "downloading" && item.eta != null ? `<span class="download-card__eta">ETA: ${humanEta(item.eta)}</span>` : ""}
+        ${item.totalSize > 0 ? `<span class="download-card__total-size">${humanSize(item.totalSize)}</span>` : ""}
+      </div>
+      <div class="download-card__meta-spacer"></div>
+      <div class="download-card__bottom-actions">
+        ${bottomActionsHtml(status)}
+      </div>
     </div>
   `;
 
@@ -581,6 +633,14 @@ function refreshStatusBar() {
   statusSpeed.textContent = `↓ ${humanSpeed(totalSpeed)}`;
   statusActive.textContent = `${active} active`;
   statusQueued.textContent = `${queued} queued`;
+
+  if (headerSpeedVal) {
+    headerSpeedVal.textContent = humanSpeed(totalSpeed);
+  }
+  if (headerActiveBadge) {
+    headerActiveBadge.textContent = `${active} active`;
+    headerActiveBadge.hidden = active === 0;
+  }
 }
 
 pauseAllBtn.addEventListener("click", async () => {

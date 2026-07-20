@@ -31,6 +31,10 @@
           <span class="nav-item__icon" aria-hidden="true">⚙</span>
           <span class="nav-item__label">Settings</span>
         </button>
+        <button class="nav-item nav-item--add" id="sidebar-add-btn" type="button">
+          <span class="nav-item__icon" aria-hidden="true">+</span>
+          <span class="nav-item__label">Add New</span>
+        </button>
       </nav>
 
       <button
@@ -49,10 +53,20 @@
       <!-- Downloads view -->
       <section class="view active" id="view-downloads" data-view="downloads">
         <header class="view__header">
-          <h1 class="view__title">Downloads</h1>
-          <button class="btn-ghost btn-ghost--sm" id="clear-paused" type="button" hidden>
-            Clear paused
-          </button>
+          <div class="view__header-left">
+            <h1 class="view__title">Downpour Downloads</h1>
+          </div>
+          <div class="view__header-right">
+            <button class="btn-header-add" id="header-add-btn" type="button">+ New Download</button>
+            <div class="global-speed-container">
+              <span class="global-speed-label">Global Speed</span>
+              <span class="global-speed-val" id="header-speed-val">0 B/s</span>
+            </div>
+            <span class="badge badge--downloading header-active-badge" id="header-active-badge" hidden>active</span>
+            <button class="btn-ghost btn-ghost--sm" id="clear-paused" type="button" hidden>
+              Clear paused
+            </button>
+          </div>
         </header>
 
         <!-- Toolbar: search + status filter pills + density toggle -->

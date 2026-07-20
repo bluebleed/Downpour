@@ -11,16 +11,16 @@
 /* ─── 1. Custom properties ─────────────────────────────────────────────── */
 :root {
   /* Base surfaces */
-  --bg-base: #0a0c10;
-  --bg-elevated: rgba(20, 23, 30, 0.75);
-  --bg-surface: rgba(28, 32, 42, 0.6);
+  --bg-base: #0d0f16;
+  --bg-elevated: rgba(15, 18, 25, 0.45);
+  --bg-surface: rgba(25, 30, 40, 0.4);
   --bg-overlay: rgba(10, 12, 16, 0.85);
 
   /* Glass effect */
-  --glass-bg: rgba(22, 26, 35, 0.65);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-border-hover: rgba(255, 255, 255, 0.14);
-  --glass-blur: 20px;
+  --glass-bg: rgba(20, 25, 35, 0.5);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-border-hover: rgba(255, 255, 255, 0.12);
+  --glass-blur: 24px;
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 
   /* Accent (Electric Violet) */
@@ -113,11 +113,31 @@ body {
   font-family: var(--font-system);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
-  background: var(--bg-base);
+  background: radial-gradient(at 0% 0%, rgba(124, 92, 252, 0.15) 0px, transparent 50%),
+              radial-gradient(at 100% 100%, rgba(59, 130, 246, 0.1) 0px, transparent 50%),
+              radial-gradient(at 50% 0%, rgba(139, 92, 246, 0.08) 0px, transparent 50%),
+              radial-gradient(at 0% 100%, rgba(6, 182, 212, 0.08) 0px, transparent 50%),
+              #0c0f16;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.01);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* When Tauri sets a transparent window (set via JS on init). */
@@ -150,10 +170,10 @@ h2 {
   position: fixed;
   left: 0;
   top: 0;
-  background: var(--bg-elevated);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border-right: 1px solid var(--border-subtle);
+  background: rgba(15, 18, 25, 0.45);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
   display: flex;
   flex-direction: column;
   padding: 16px 0;
@@ -224,12 +244,81 @@ h2 {
 }
 
 .view__header {
-  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 18px;
+}
+
+.view__header-left {
+  display: flex;
+  align-items: center;
+}
+
+.view__header-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
 }
 
 .view__title {
   font-size: var(--text-xl);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, #fff 0%, #a8b1bf 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.btn-header-add {
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+  border: none;
+  color: white;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.35);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-header-add:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5);
+  filter: brightness(1.1);
+}
+
+.btn-header-add:active {
+  transform: translateY(0);
+}
+
+.global-speed-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.global-speed-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.global-speed-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.header-active-badge {
+  box-shadow: 0 0 10px rgba(74, 168, 255, 0.25);
+  border: 1px solid rgba(74, 168, 255, 0.15);
 }
 
 .view__placeholder {
@@ -310,21 +399,21 @@ h2 {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 10px 16px;
   border: none;
-  border-left: 3px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
   font-family: inherit;
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
   overflow: hidden;
   text-align: left;
-  width: 100%;
+  width: calc(100% - 16px);
+  margin: 2px 8px;
 }
 
 .nav-item:hover {
@@ -333,9 +422,28 @@ h2 {
 }
 
 .nav-item.active {
-  background: var(--accent-subtle);
-  color: var(--accent-text);
-  border-left-color: var(--accent);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.nav-item--add {
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%) !important;
+  color: white !important;
+  font-weight: 600;
+  margin-top: 16px !important;
+  box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+  border: none !important;
+}
+
+.nav-item--add:hover {
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.45) !important;
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+.nav-item--add:active {
+  transform: translateY(0);
 }
 
 .nav-item__icon {
@@ -640,20 +748,23 @@ h2 {
 
 /* ── Download card ─────────────────────────────────────────────────────── */
 .download-card {
-  background: var(--bg-surface);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: 14px;
-  padding: 14px 16px;
+  background: rgba(30, 35, 45, 0.45);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .download-card:hover {
-  border-color: var(--glass-border-hover);
-  box-shadow: var(--glass-shadow);
+  border-color: rgba(124, 92, 252, 0.25);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35), 0 0 15px rgba(124, 92, 252, 0.1);
+  transform: translateY(-1px);
 }
 
 .download-card[hidden] {
@@ -662,8 +773,24 @@ h2 {
 
 .download-card__head {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.download-card__title-row {
+  display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.download-card__badge-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .download-card__icon {
@@ -673,6 +800,9 @@ h2 {
   width: 28px;
   text-align: center;
   color: var(--accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .file-icon {
@@ -682,8 +812,6 @@ h2 {
 }
 
 .download-card__filename {
-  flex: 1;
-  min-width: 0;
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
@@ -692,41 +820,29 @@ h2 {
   text-overflow: ellipsis;
 }
 
-.download-card__speed {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--status-downloading);
-}
-
-.download-card__actions {
-  flex-shrink: 0;
+.download-card__actions-top {
   display: flex;
-  gap: 2px;
+  gap: 4px;
 }
 
 .btn-icon {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.btn-icon svg {
-  display: block;
+  transition: all 0.15s ease;
 }
 
 .btn-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
   color: var(--text-primary);
 }
 
@@ -736,28 +852,31 @@ h2 {
 
 .btn-icon--danger:hover {
   color: var(--status-error);
+  border-color: rgba(248, 114, 114, 0.3);
+  background: rgba(248, 114, 114, 0.08);
 }
 
 /* Progress bar */
 .progress-bar {
   position: relative;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
-  overflow: hidden;
-  margin: 10px 0 8px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  margin: 6px 0;
+  overflow: visible; /* Let progress-bar__badge pop out! */
 }
 
 .progress-bar__fill {
   height: 100%;
-  border-radius: 3px;
+  border-radius: 999px;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
+  overflow: visible;
 }
 
 .progress-bar__fill--downloading {
-  background: linear-gradient(90deg, var(--accent) 0%, #8b5cf6 100%);
-  box-shadow: 0 0 8px var(--accent-glow), 0 0 2px var(--accent-glow);
+  background: linear-gradient(90deg, #ec4899 0%, #a855f7 50%, #3b82f6 100%);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.4);
 }
 
 .progress-bar__fill--queued {
@@ -769,15 +888,44 @@ h2 {
 }
 
 .progress-bar__fill--paused {
-  background: linear-gradient(90deg, var(--status-paused) 0%, #f59e0b 100%);
+  background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
 }
 
 .progress-bar__fill--complete {
-  background: linear-gradient(90deg, var(--status-complete) 0%, #10b981 100%);
+  background: linear-gradient(90deg, #3b82f6 0%, #10b981 100%);
 }
 
 .progress-bar__fill--error {
-  background: linear-gradient(90deg, var(--status-error) 0%, #dc2626 100%);
+  background: linear-gradient(90deg, #ef4444 0%, #b91c1c 100%);
+}
+
+.progress-bar__badge {
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #a855f7;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 2px solid #161a23;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 8px rgba(168, 85, 247, 0.5);
+  font-family: var(--font-mono);
+  z-index: 10;
+}
+
+.progress-bar__fill--complete .progress-bar__badge {
+  background: #10b981;
+  border-color: #161a23;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 8px rgba(16, 185, 129, 0.5);
+}
+
+.progress-bar__fill--paused .progress-bar__badge {
+  background: #f59e0b;
+  border-color: #161a23;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 8px rgba(245, 190, 11, 0.5);
 }
 
 /* Animated shimmer on active downloads */
@@ -788,10 +936,11 @@ h2 {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.15) 50%,
+    rgba(255, 255, 255, 0.25) 50%,
     transparent 100%
   );
-  animation: shimmer 2s ease-in-out infinite;
+  animation: shimmer 1.8s ease-in-out infinite;
+  border-radius: 999px;
 }
 
 @keyframes shimmer {
@@ -807,41 +956,75 @@ h2 {
 .download-card__meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
   font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 
-.download-card__meta .download-card__pct {
+.download-card__stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
 }
 
-.download-card__size,
+.download-card__speed {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
 .download-card__eta {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  color: #c084fc;
+}
+
+.download-card__total-size {
+  color: var(--text-secondary);
 }
 
 .download-card__meta-spacer {
   flex: 1;
 }
 
-.download-card__date {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  white-space: nowrap;
+.download-card__bottom-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.download-card__error {
-  color: var(--status-error);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 40%;
+.btn-card-action {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-card-action:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.btn-card-action:active {
+  transform: scale(0.96);
+}
+
+.btn-card-action--cancel:hover,
+.btn-card-action--delete:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.btn-card-action--resume:hover,
+.btn-card-action--open:hover {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
 }
 
 /* Inline meta shown only in compact view (hidden by default) */
