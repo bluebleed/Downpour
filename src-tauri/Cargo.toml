@@ -44,3 +44,11 @@ axum = "0.7"
 opt-level = "s"
 lto = true
 strip = true
+
+# Keep useful application backtraces in development without retaining full
+# debug information for the large third-party dependency graph.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

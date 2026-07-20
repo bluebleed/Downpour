@@ -110,6 +110,12 @@ async fn remove_download(queue: tauri::State<'_, QueueManager>, id: String) -> R
     queue.remove(&id).await.map_err(|e| format!("{e:#}"))
 }
 
+/// Remove paused queue records without touching files on disk.
+#[tauri::command]
+async fn clear_paused_downloads(queue: tauri::State<'_, QueueManager>) -> Result<usize, String> {
+    Ok(queue.clear_paused().await)
+}
+
 /// Move a download to a new position in the queue (Req 3.3).
 #[tauri::command]
 async fn reorder_download(
@@ -273,7 +279,7 @@ fn os_open(path: &Path, reveal: bool) -> Result<(), String> {
         #[cfg(target_os = "windows")]
         {
             // explorer's `/select,` syntax is parsed by explorer itself, not the
-            // CRT argv splitter — paths with spaces (e.g. "Yash Verma") break the
+            // CRT argv splitter — paths with spaces (e.g. "John Doe") break the
             // default Command quoting and explorer opens the wrong folder. Build
             // the argument verbatim with `raw_arg` and quote the path ourselves.
             use std::os::windows::process::CommandExt;
@@ -609,27 +615,45 @@ fn spawn_completion_notifier(app: tauri::AppHandle, settings: SettingsState) {
 
 // ─── System tray ─────────────────────────────────────────────────────────────────
 
-/// Build the system tray icon with a Show / Hide / Quit menu (Req: system tray).
+/// Build the system tray icon with Show, Hide, Pause All, Resume All, and Quit.
 ///
 /// Left-clicking the tray icon shows and focuses the main window; the menu items
 /// give explicit show/hide/quit control. Pairs with the window-close handler,
 /// which hides to the tray instead of quitting when `minimize_to_tray` is on.
-fn build_tray(app: &tauri::App) -> tauri::Result<()> {
+fn build_tray(app: &tauri::App, queue: QueueManager) -> tauri::Result<()> {
     let show_i = MenuItem::with_id(app, "tray_show", "Show Downpour", true, None::<&str>)?;
     let hide_i = MenuItem::with_id(app, "tray_hide", "Hide to Tray", true, None::<&str>)?;
+    let pause_i = MenuItem::with_id(app, "tray_pause_all", "Pause All", true, None::<&str>)?;
+    let resume_i = MenuItem::with_id(app, "tray_resume_all", "Resume All", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "tray_quit", "Quit Downpour", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_i, &hide_i, &quit_i])?;
+    let menu = Menu::with_items(app, &[&show_i, &hide_i, &pause_i, &resume_i, &quit_i])?;
 
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .tooltip("Downpour")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(move |app, event| match event.id.as_ref() {
             "tray_show" => show_main_window(app),
             "tray_hide" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();
                 }
+            }
+            "tray_pause_all" => {
+                let queue = queue.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = queue.pause_all().await {
+                        eprintln!("failed to pause all downloads from tray: {e:#}");
+                    }
+                });
+            }
+            "tray_resume_all" => {
+                let queue = queue.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = queue.resume_all().await {
+                        eprintln!("failed to resume all downloads from tray: {e:#}");
+                    }
+                });
             }
             "tray_quit" => app.exit(0),
             _ => {}
@@ -759,8 +783,8 @@ pub fn run() {
             // Announce completed downloads via native notifications.
             spawn_completion_notifier(handle.clone(), settings_state.clone());
 
-            // Build the system tray (Show / Hide / Quit + click-to-show).
-            if let Err(e) = build_tray(app) {
+            // Build the system tray (Show / Hide / Pause / Resume / Quit + click-to-show).
+            if let Err(e) = build_tray(app, queue.clone()) {
                 eprintln!("failed to build system tray: {e:#}");
             }
 
@@ -800,6 +824,7 @@ pub fn run() {
             resume_download,
             cancel_download,
             remove_download,
+            clear_paused_downloads,
             reorder_download,
             pause_all,
             resume_all,

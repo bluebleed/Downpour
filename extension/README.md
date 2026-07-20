@@ -1,54 +1,28 @@
----
-type: project-root
-title: Downpour Capture (browser extension)
-category: desktop-apps
-status: active
-created: 2026-06-05
-last-updated: 2026-07-02
-load-behavior: eager
----
+# Downpour Capture
 
-# Downpour Capture (browser extension)
+This optional Manifest V3 extension hands new browser downloads to the locally
+running Downpour desktop app at `http://127.0.0.1:53472`.
 
-Intercepts downloads in your browser and forwards them to the Downpour desktop
-app (which must be running) over `http://127.0.0.1:53472`.
+## Privacy model
 
-For each intercepted download it captures the full request context so
-authenticated/protected downloads succeed once handed to the engine:
+- Capture is **off by default**.
+- It only handles downloads that begin after you turn capture on.
+- It does not import browser download history or scan local files.
+- It does not request browsing-history, cookie, or all-sites permissions.
+- It sends data only to the local Downpour app, never to a remote service.
 
-- the download URL, suggested filename, declared size and MIME type
-- the `Cookie` header the browser would send to the download domain
-  (via `chrome.cookies.getAll`, including subdomain-scoped cookies)
-- the referer and the URL of the page that triggered the download
-- a `isMedia` hint based on MIME type / file extension
+When Downpour is not running, your browser keeps the download normally.
 
-## Permissions
+## Install for development
 
-- `downloads` — intercept and cancel browser downloads
-- `cookies` + `<all_urls>` host access — read the cookies a download needs
-- `tabs` — read the active tab's URL for referer/page context
-- `storage` — remember the on/off toggle
+1. Start the desktop app: `npm run tauri dev`.
+2. In Chrome, Edge, or Brave, open the extensions page.
+3. Enable **Developer mode**.
+4. Choose **Load unpacked** and select this `extension` directory.
+5. Open the extension popup. It should report **Connected to Downpour**.
+6. Turn on **Capture downloads** only when you want future downloads routed to
+   Downpour.
 
-The extension only sends this data to the local Downpour app on
-`127.0.0.1:53472`; nothing leaves your machine.
-
-## Load it (unpacked)
-
-**Chrome / Edge / Brave**
-1. Go to `chrome://extensions`
-2. Enable **Developer mode** (top-right)
-3. Click **Load unpacked** and select this `extension/` folder
-
-**Firefox**
-1. Go to `about:debugging#/runtime/this-firefox`
-2. Click **Load Temporary Add-on…**
-3. Select `manifest.json` in this folder
-
-## Use
-
-- Click the toolbar icon to toggle capture on/off and see connection status.
-- When ON and the Downpour app is running, new downloads are handed to Downpour.
-- When the app is **not** running, the browser downloads normally (safe fallback).
-
-> Note: Firefox uses Manifest V3 slightly differently; for production you may want
-> a separate `background.scripts` entry. This works for temporary/dev loading.
+Use the page context menu for the explicit media actions. Only download media
+you are permitted to access; the extension does not bypass DRM, paywalls, or
+other access controls.

@@ -147,10 +147,10 @@ Browser Extension (extension/)  --POST /capture (cookies+headers+referer)--> Cap
 
 ## Open TODOs (from AGENTS.md roadmap, not yet done)
 
-- [ ] System tray + native notifications (tauri-plugin-notification registered but tray not implemented).
+- [x] **System tray + minimize-to-tray.** ✅ (June 2026) Tray menu provides Show, Hide, Pause All, Resume All, and Quit; the `minimize_to_tray` setting controls close-to-hide behavior.
 - [x] **`queue.rs` `suspended` flag is set after restore — expose "Resume All on Startup" setting.** ✅ (June 2026) `AppSettings.resume_on_startup` (default `false`); when enabled, `lib.rs` setup calls `queue.resume_all()` after `restore_from_disk()` so interrupted downloads auto-resume. UI toggle in the Settings view.
 - [x] **`downloader.rs`: `downloads_dir()` ignored `AppSettings.download_dir`.** ✅ (June 2026) Resolved: the configured dir now flows `AppSettings.download_dir` → `QueueConfig.download_dir` → `QueueManager` (live `RwLock<PathBuf>`, updated by `set_download_dir` on settings change) → threaded as `dest_dir` into `run`/`resume_download`/`download_core`/`resume_core`, and used by cancel/media cleanup + the completion categorizer's source path. `downloads_dir()` remains only as the default fallback. In-flight downloads keep their original destination if the dir changes mid-flight.
-- [ ] Extension: The `content.js` media detection is basic; expand for more platforms.
+- [x] **Extension media detection expanded.** ✅ (July 2026) `content.js` detects native/lazy media sources plus Open Graph/Twitter and preload metadata; it only reports already-exposed HTTP(S) candidates and does not bypass DRM or access controls.
 - [ ] HOW_TO_RUN.md mentions `run.bat` which handles Windows setup well.
 
 ## Testing

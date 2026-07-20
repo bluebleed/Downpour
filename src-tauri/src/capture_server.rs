@@ -209,6 +209,19 @@ pub fn build_captured_item(
     item
 }
 
+/// Convert a browser-supplied filename into a safe display/download name.
+/// Browser download APIs commonly provide an absolute local path; that path is
+/// neither useful to Downpour nor appropriate to retain in its queue state.
+pub fn capture_filename(filename: Option<&str>, url: &str) -> String {
+    let basename =
+        filename.and_then(|raw| raw.rsplit(['/', '\\']).find(|part| !part.trim().is_empty()));
+
+    match basename {
+        Some(name) => downloader::sanitize_filename(name),
+        None => downloader::filename_from_url(url),
+    }
+}
+
 pub async fn serve(app: AppHandle, queue: QueueManager) -> anyhow::Result<()> {
     let ctx = Ctx {
         queue,
@@ -326,13 +339,7 @@ async fn capture(
     }
 
     let id = uuid::Uuid::new_v4().to_string();
-    let filename = req
-        .filename
-        .as_ref()
-        .map(|f| f.trim())
-        .filter(|f| !f.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| downloader::filename_from_url(&req.url));
+    let filename = capture_filename(req.filename.as_deref(), &req.url);
 
     // Build the item, attaching whatever captured context is present (Req 6.3, 6.7).
     let item = build_captured_item(

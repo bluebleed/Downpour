@@ -566,7 +566,13 @@ mod settings_roundtrip_tests {
     /// exist, which would otherwise prevent that single field from round-tripping.
     fn app_settings_strategy() -> impl Strategy<Value = (AppSettings, String)> {
         let numbers = (1usize..=10, 1u32..=32, any::<u64>(), any::<u64>());
-        let flags = (any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>());
+        let flags = (
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+        );
         let collections = (
             prop::collection::vec(category_rule_strategy(), 0..5),
             prop::collection::vec("\\.[a-z0-9]{1,5}", 0..8),
@@ -578,7 +584,13 @@ mod settings_roundtrip_tests {
         (numbers, flags, collections, dir_fragment).prop_map(
             |(
                 (max_concurrent, default_segments, speed_limit, capture_min_size),
-                (auto_categorize, auto_start_queue, minimize_to_tray, notifications_enabled),
+                (
+                    auto_categorize,
+                    auto_start_queue,
+                    minimize_to_tray,
+                    clipboard_watcher,
+                    notifications_enabled,
+                ),
                 (categories, capture_extensions, ytdlp_path, ffmpeg_path),
                 dir_fragment,
             )| {
@@ -593,6 +605,7 @@ mod settings_roundtrip_tests {
                     auto_start_queue,
                     resume_on_startup: false,
                     minimize_to_tray,
+                    clipboard_watcher,
                     notifications_enabled,
                     confirm_on_delete: true,
                     capture_min_size,
@@ -618,6 +631,7 @@ mod settings_roundtrip_tests {
         prop_assert_eq!(loaded.auto_categorize, original.auto_categorize);
         prop_assert_eq!(loaded.auto_start_queue, original.auto_start_queue);
         prop_assert_eq!(loaded.minimize_to_tray, original.minimize_to_tray);
+        prop_assert_eq!(loaded.clipboard_watcher, original.clipboard_watcher);
         prop_assert_eq!(loaded.notifications_enabled, original.notifications_enabled);
         prop_assert_eq!(loaded.capture_min_size, original.capture_min_size);
         prop_assert_eq!(&loaded.capture_extensions, &original.capture_extensions);

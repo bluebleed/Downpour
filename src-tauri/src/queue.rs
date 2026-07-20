@@ -324,6 +324,32 @@ impl QueueManager {
         Ok(())
     }
 
+    /// Remove every paused queue record without deleting any downloaded files.
+    ///
+    /// This is deliberately limited to paused items: active, queued, errored,
+    /// and completed downloads remain untouched. It is intended for dismissing
+    /// restored or accidentally captured entries safely.
+    pub async fn clear_paused(&self) -> usize {
+        let ids: Vec<String> = {
+            let map = self.inner.downloads.lock().await;
+            map.values()
+                .filter(|item| item.status == DownloadStatus::Paused)
+                .map(|item| item.id.clone())
+                .collect()
+        };
+
+        for id in &ids {
+            // `ids` is derived from the map above, so a missing record can only
+            // result from a concurrent user action and is safe to ignore.
+            let _ = self.remove_record(id).await;
+        }
+
+        if !ids.is_empty() {
+            self.emit_queue_changed().await;
+        }
+        ids.len()
+    }
+
     /// Move a download to a new position in the queue. Only affects scheduling
     /// order for items that are still `Queued` (Req 3.3).
     pub async fn reorder(&self, id: &str, position: usize) -> Result<()> {

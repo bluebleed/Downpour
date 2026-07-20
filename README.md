@@ -1,100 +1,78 @@
----
-type: project-root
-title: Downpour
-category: desktop-apps
-status: active
-created: 2026-06-05
-last-updated: 2026-07-02
-load-behavior: eager
----
-
 # Downpour
 
-A fast, universal (macOS · Windows · Linux) download manager — an IDM-style app for personal use.
+Downpour is a fast, cross-platform desktop download manager built with Tauri 2:
+a Rust download engine and a lightweight web UI packaged as one native app.
 
-Built with **Tauri 2** (Rust core + web UI), so it ships as a tiny native binary and runs
-natively on Apple Silicon + Intel Macs, Windows, and Linux from a single codebase.
+> Responsible use: download only content you are allowed to access. Downpour
+> does not support bypassing DRM, paywalls, or access controls.
 
-> Responsible use: Downpour is a general-purpose downloader. Only download content you are
-> allowed to access. Do not use it to bypass DRM/paywalls or to download content in violation
-> of a site's Terms of Service (this includes most YouTube content unless it's your own,
-> Creative Commons, or otherwise permitted).
+> [!NOTE]
+> **AI-Designed & Active Development**: Downpour has been designed and implemented in collaboration with AI coding assistants (Antigravity and Codex). The project is in active development and will continue to improve over time.
 
----
+## Features
 
-## Features (planned)
+- Parallel HTTP downloads with pause/resume and restart persistence
+- Queue, concurrency controls, speed limit, search, filtering, and batch URL add
+- Optional categorization of completed files
+- Optional system tray and native notifications
+- Optional browser extension for new downloads you explicitly choose to capture
+- Optional yt-dlp/ffmpeg integration for permitted media downloads
 
-- [x] Project scaffold (Tauri 2, cross-platform targets)
-- [ ] Segmented / parallel downloading via HTTP `Range` requests (faster downloads)
-- [ ] Pause / resume (survives app restarts)
-- [ ] Download queue (run N at a time)
-- [ ] Speed limiting
-- [ ] Auto-capture from the browser (companion extension)
-- [ ] Video extraction via `yt-dlp` + `ffmpeg` (for permitted content)
-- [ ] System tray + native notifications
-- [ ] Auto-categorize by file type
+## Run locally
 
-## Architecture
+### Prerequisites
 
-```
-┌──────────────────┐  captures URL + cookies + headers
-│ Browser Extension│ ──────────────────────────────────┐
-│ (extension/)     │                                    │
-└──────────────────┘                                    ▼
-                                       ┌───────────────────────────────┐
-┌──────────────────┐  Tauri commands  │  Downpour core (src-tauri/)   │
-│ Web Dashboard    │ ◄──────────────► │  - segmented download engine  │
-│ (src/)           │  + live events   │  - queue manager              │
-└──────────────────┘                  │  - local capture HTTP server  │
-                                       └───────────────────────────────┘
-                                                       │
-                                                       ▼
-                                              files saved to disk
-```
+- Node.js 18 or newer
+- Rust stable via [rustup](https://rustup.rs/)
+- Platform prerequisites for [Tauri v2](https://v2.tauri.app/start/prerequisites/)
+- Optional: `yt-dlp` and `ffmpeg` for the Media view
 
-- **`src-tauri/`** — Rust: the download engine, queue, and a tiny localhost HTTP server the
-  browser extension posts captured URLs to.
-- **`src/`** — the dashboard UI (Vite + vanilla JS, swap for React/Svelte if you like).
-- **`extension/`** — Manifest V3 browser extension that intercepts downloads and forwards them.
-
-## Prerequisites (on your Mac)
-
-1. **Rust** — https://rustup.rs
-2. **Node.js** ≥ 18 — https://nodejs.org
-3. **Tauri CLI** — `cargo install tauri-cli --version "^2.0.0"` (or use `npm`/`pnpm` scripts)
-4. (Optional, for video) **yt-dlp** and **ffmpeg** on your `PATH`.
-
-## Develop
+### Development
 
 ```bash
 npm install
-npm run tauri dev      # launches the desktop app with hot-reload
+npm run tauri dev
 ```
 
-## Build (universal)
+The first run compiles the Rust application and can take a few minutes. On
+Windows, `run.bat` is also available as a convenience launcher.
+
+### Checks
 
 ```bash
-# macOS universal (Apple Silicon + Intel)
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
-npm run tauri build -- --target universal-apple-darwin
-
-# Windows
-npm run tauri build -- --target x86_64-pc-windows-msvc
-
-# Linux
-npm run tauri build
+npm.cmd run build
+node extension/filter.property.test.js
+cargo fmt --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 ```
 
-## Browser extension
+## Install the browser extension
 
-Load `extension/` as an unpacked extension:
-- Chrome/Edge: `chrome://extensions` → enable Developer mode → "Load unpacked" → select `extension/`.
-- Firefox: `about:debugging` → "This Firefox" → "Load Temporary Add-on" → select `extension/manifest.json`.
+The companion extension is optional and disabled by default.
 
-The extension posts captured downloads to `http://127.0.0.1:53472/capture` (the Downpour app
-must be running).
+1. Start Downpour with `npm run tauri dev`.
+2. Open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
+3. Enable **Developer mode**, choose **Load unpacked**, and select the
+   repository's `extension` directory.
+4. Open the Downpour Capture popup and verify it says **Connected to
+   Downpour**.
+5. Turn on **Capture downloads** only when you want future browser downloads
+   sent to Downpour. It does not import existing browser downloads.
 
-## Status
+The extension only communicates with the local app at `127.0.0.1`. It does not
+request browsing-history, cookie, or all-sites permissions.
 
-This is a **starter scaffold** — the core download engine has a working baseline; queue,
-speed-limiting, resume-across-restart, and yt-dlp integration are marked with `TODO`s.
+## Privacy and security
+
+See [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md). Local app state,
+workspace notes, credentials, certificates, build outputs, and temporary files
+are excluded from Git. Review `git status` before every commit.
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

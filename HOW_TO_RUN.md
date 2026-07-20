@@ -29,8 +29,7 @@ Optional, only needed for the **Media** (video/audio) feature:
 
 ## 2. Launch with run.bat
 
-From the project folder (`d:\workspace\desktop-apps\Downpour`), double-click
-**`run.bat`** or run it from a terminal:
+From the project folder, double-click **`run.bat`** or run it from a terminal:
 
 ```bat
 run.bat
@@ -61,13 +60,16 @@ The window has a sidebar with four views.
 
 ### Downloads
 - Click the **+** floating button (bottom-right) to open **Add Download**.
-- Paste a URL, optionally override the filename, pick a **segment count**
+- Paste one URL or multiple URLs (one per line), optionally override the filename
+  for a single URL, pick a **segment count**
   (more segments can download faster), and click **Download**.
 - Each download shows a progress bar, live speed, ETA, and a status badge.
 - Per-card buttons: **pause / resume / cancel** (cancel discards the partial file).
 - Use the **search box**, **status filter pills** (All / Downloading / Queued /
   Paused / Complete / Error), and the **compact/comfortable** toggle to manage a
   long list.
+- **Clear paused** removes all paused queue records after confirmation. It never
+  deletes downloaded files.
 
 ### Queue
 - Shows downloads in scheduling order. **Drag to reorder** queued items.
@@ -94,15 +96,18 @@ The window has a sidebar with four views.
 
 ## 4. Browser capture extension (optional)
 
-The `extension/` folder is a Manifest V3 browser extension that hands your
-browser's downloads to Downpour automatically.
+The `extension/` folder is an optional Manifest V3 extension that can hand new
+browser downloads to Downpour.
 
 1. Open your browser's extensions page and enable **Developer mode**.
 2. Choose **Load unpacked** and select the `extension/` folder.
 3. With Downpour running, the extension's popup shows "Connected to Downpour".
 4. Configure size/extension filters in the popup as desired.
+5. **Capture downloads is off by default.** Turn it on only when you want new
+   downloads to be handed to Downpour. It does not import existing downloads.
 
-The extension talks to Downpour over `http://127.0.0.1:53472` (local only).
+The extension talks to Downpour over `http://127.0.0.1:53472` (local only) and
+does not request browsing-history, cookie, or all-sites permissions.
 
 ## 5. Where files go
 
@@ -114,6 +119,18 @@ The extension talks to Downpour over `http://127.0.0.1:53472` (local only).
   were active when the app closed come back **paused** — resume them manually.
 
 ## 6. Troubleshooting
+
+### Disk usage
+
+Rust stores regenerable build artifacts in `src-tauri/target/`. If it grows
+larger than you are comfortable with, reclaim the space with:
+
+```bash
+cargo clean --manifest-path src-tauri/Cargo.toml
+```
+
+The next `npm run tauri dev` performs a full rebuild; downloads and app settings
+are not affected.
 
 - **"Node.js / npm / cargo was not found"** — install the missing tool (section 1)
   and re-run `run.bat`.

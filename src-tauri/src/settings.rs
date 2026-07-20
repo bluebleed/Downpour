@@ -47,7 +47,12 @@ pub struct AppSettings {
     #[serde(default)]
     pub resume_on_startup: bool,
     /// Whether closing the window minimizes to system tray.
+    #[serde(default)]
     pub minimize_to_tray: bool,
+    /// Whether a focused app window should offer to add copied direct-download URLs.
+    /// Disabled by default and serde-defaulted for older settings files.
+    #[serde(default)]
+    pub clipboard_watcher: bool,
     /// Whether to show desktop notifications on completion/error.
     pub notifications_enabled: bool,
     /// Whether to ask for confirmation before deleting a downloaded file from
@@ -83,6 +88,7 @@ impl Default for AppSettings {
             auto_start_queue: true,
             resume_on_startup: false,
             minimize_to_tray: false,
+            clipboard_watcher: false,
             notifications_enabled: true,
             confirm_on_delete: true,
             capture_min_size: 1_048_576, // 1 MB
@@ -323,6 +329,11 @@ mod tests {
     fn resume_on_startup_defaults_off() {
         // Matches the spec: restored downloads stay paused until the user resumes.
         assert!(!AppSettings::default().resume_on_startup);
+    }
+
+    #[test]
+    fn clipboard_watcher_defaults_off() {
+        assert!(!AppSettings::default().clipboard_watcher);
     }
 
     #[test]

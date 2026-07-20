@@ -17,3 +17,22 @@ binaries/
 # Local data
 *.part
 downpour-data/
+
+# Local workspace state and secrets (never publish)
+.claude/
+context/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.kiro/
+.vscode/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local test/debug output
+test_out*.txt

@@ -24,6 +24,7 @@ const statusActive = document.querySelector("#status-active");
 const statusQueued = document.querySelector("#status-queued");
 const pauseAllBtn = document.querySelector("#pause-all");
 const resumeAllBtn = document.querySelector("#resume-all");
+const clearPausedBtn = document.querySelector("#clear-paused");
 
 const searchInput = document.querySelector("#download-search");
 const filterPills = document.querySelector("#filter-pills");
@@ -37,6 +38,8 @@ const rows = new Map();
 /* Downloads view UI state. */
 let activeFilter = "all"; // matches the data-filter pills
 let searchQuery = ""; // lower-cased search text
+let clipboardWatcherEnabled = false;
+let lastClipboardUrl = "";
 
 /* ─── Formatting helpers ──────────────────────────────────────────────── */
 function humanSize(bytes) {
@@ -257,6 +260,46 @@ function closeModal() {
   segmentsValue.textContent = "4";
 }
 
+function parseDownloadUrls(value) {
+  return [...new Set(value.split(/\r?\n/).map((url) => url.trim()).filter(Boolean))]
+    .filter((url) => {
+      try {
+        const parsed = new URL(url);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+      } catch {
+        return false;
+      }
+    });
+}
+
+const DIRECT_DOWNLOAD_EXTENSION = /\.(?:7z|apk|avi|bz2|csv|deb|dmg|docx?|exe|flac|gif|gz|iso|jpe?g|m4a|m4v|mkv|mov|mp3|mp4|msi|pdf|png|pptx?|rar|rpm|tar|txt|wav|webm|xlsx?|zip)$/i;
+
+function isDirectDownloadUrl(value) {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:")
+      && DIRECT_DOWNLOAD_EXTENSION.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function checkClipboardForDownloadUrl() {
+  if (!clipboardWatcherEnabled || !document.hasFocus() || addModal.hidden === false) return;
+  try {
+    const value = (await navigator.clipboard.readText()).trim();
+    if (!value || value === lastClipboardUrl || !isDirectDownloadUrl(value)) return;
+    lastClipboardUrl = value;
+    openModal();
+    urlInput.value = value;
+    showToast("A copied download URL is ready to add.", "info");
+  } catch {
+    // Clipboard permission may be unavailable until a user gesture; retry later.
+  }
+}
+
+setInterval(checkClipboardForDownloadUrl, 1500);
+
 fab.addEventListener("click", openModal);
 addCancel.addEventListener("click", closeModal);
 addModal.addEventListener("click", (e) => {
@@ -314,23 +357,40 @@ segmentsInput.addEventListener("input", () => {
 
 addForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const url = urlInput.value.trim();
-  if (!url) return;
+  const urls = parseDownloadUrls(urlInput.value);
+  if (!urls.length) {
+    showToast("Enter one or more valid HTTP(S) URLs, one per line.", "error");
+    return;
+  }
 
   // Client-side validation before invoking the command (Req 11.2 bounds).
   const segments = clampInt(segmentsInput.value, 1, 32, 4);
-  const filename = filenameInput.value.trim();
+  const filename = urls.length === 1 ? filenameInput.value.trim() : "";
+  let added = 0;
+  const failures = [];
 
-  try {
-    const args = { url, segments };
-    if (filename) args.filename = filename;
-    const item = await invoke("start_download", args);
-    renderRow(item);
-    upsertItem(item);
+  for (const url of urls) {
+    try {
+      const args = { url, segments };
+      if (filename) args.filename = filename;
+      const item = await invoke("start_download", args);
+      renderRow(item);
+      upsertItem(item);
+      added++;
+    } catch (err) {
+      failures.push(`${url}: ${err}`);
+    }
+  }
+
+  if (added > 0) {
     closeModal();
-    showToast(`Added “${item.filename || url}” to the queue`, "success");
-  } catch (err) {
-    showToast(`Could not start download: ${err}`, "error");
+    showToast(
+      added === 1 ? "Added 1 download to the queue" : `Added ${added} downloads to the queue`,
+      "success",
+    );
+  }
+  if (failures.length) {
+    showToast(`Could not add ${failures.length} URL${failures.length === 1 ? "" : "s"}: ${failures[0]}`, "error");
   }
 });
 
@@ -455,7 +515,8 @@ function renderRow(item) {
 /* ─── Filtering + search ──────────────────────────────────────────────── */
 function matchesFilter(item) {
   if (activeFilter !== "all" && item.status !== activeFilter) return false;
-  if (searchQuery && !(item.filename || "").toLowerCase().includes(searchQuery)) {
+  const searchable = `${item.filename || ""} ${item.url || ""}`.toLowerCase();
+  if (searchQuery && !searchable.includes(searchQuery)) {
     return false;
   }
   return true;
@@ -496,6 +557,13 @@ function updateNoMatchState(visibleCount) {
 function upsertItem(item) {
   items.set(item.id, item);
   refreshStatusBar();
+  updateClearPausedButton();
+}
+
+function updateClearPausedButton() {
+  const paused = [...items.values()].filter((item) => item.status === "paused").length;
+  clearPausedBtn.hidden = paused === 0;
+  clearPausedBtn.textContent = paused === 1 ? "Clear 1 paused" : `Clear ${paused} paused`;
 }
 
 function refreshStatusBar() {
@@ -530,6 +598,38 @@ resumeAllBtn.addEventListener("click", async () => {
     showToast("Resuming downloads", "info");
   } catch (err) {
     showToast(`Could not resume all: ${err}`, "error");
+  }
+});
+
+clearPausedBtn.addEventListener("click", async () => {
+  const paused = [...items.values()].filter((item) => item.status === "paused").length;
+  if (!paused) return;
+  const confirmed = await confirmDialog({
+    title: "Clear paused downloads",
+    message: `Remove ${paused} paused queue record${paused === 1 ? "" : "s"}? Downloaded files will not be deleted.`,
+    confirmLabel: "Clear paused",
+    danger: true,
+  });
+  if (!confirmed) return;
+
+  clearPausedBtn.disabled = true;
+  try {
+    const removed = await invoke("clear_paused_downloads");
+    for (const [id, item] of items) {
+      if (item.status === "paused") {
+        rows.get(id)?.remove();
+        rows.delete(id);
+        items.delete(id);
+      }
+    }
+    refreshStatusBar();
+    updateClearPausedButton();
+    if (rows.size === 0) showEmptyState();
+    showToast(`Cleared ${removed} paused download record${removed === 1 ? "" : "s"}`, "success");
+  } catch (err) {
+    showToast(`Could not clear paused downloads: ${err}`, "error");
+  } finally {
+    clearPausedBtn.disabled = false;
   }
 });
 
@@ -1353,6 +1453,7 @@ const setDownloadDir = document.querySelector("#set-download-dir");
 const setAutoCategorize = document.querySelector("#set-auto-categorize");
 const setResumeOnStartup = document.querySelector("#set-resume-on-startup");
 const setMinimizeToTray = document.querySelector("#set-minimize-to-tray");
+const setClipboardWatcher = document.querySelector("#set-clipboard-watcher");
 const setNotificationsEnabled = document.querySelector("#set-notifications-enabled");
 const setConfirmOnDelete = document.querySelector("#set-confirm-on-delete");
 const setYtdlpPath = document.querySelector("#set-ytdlp-path");
@@ -1424,6 +1525,8 @@ function fillSettingsForm(settings) {
   setAutoCategorize.checked = !!settings.autoCategorize;
   setResumeOnStartup.checked = !!settings.resumeOnStartup;
   setMinimizeToTray.checked = !!settings.minimizeToTray;
+  setClipboardWatcher.checked = !!settings.clipboardWatcher;
+  clipboardWatcherEnabled = setClipboardWatcher.checked;
   setNotificationsEnabled.checked = settings.notificationsEnabled !== false;
   setConfirmOnDelete.checked = settings.confirmOnDelete !== false;
   setYtdlpPath.value = settings.ytdlpPath ?? "";
@@ -1549,6 +1652,7 @@ function collectSettings() {
     autoCategorize: setAutoCategorize.checked,
     resumeOnStartup: setResumeOnStartup.checked,
     minimizeToTray: setMinimizeToTray.checked,
+    clipboardWatcher: setClipboardWatcher.checked,
     notificationsEnabled: setNotificationsEnabled.checked,
     confirmOnDelete: setConfirmOnDelete.checked,
     categories,
@@ -1577,3 +1681,7 @@ settingsForm.addEventListener("submit", async (e) => {
     saveBtn.disabled = false;
   }
 });
+
+// Load settings once at startup so opt-in features such as the clipboard watcher
+// take effect even if the user never opens the Settings view.
+loadSettingsForm();

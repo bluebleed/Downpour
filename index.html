@@ -50,6 +50,9 @@
       <section class="view active" id="view-downloads" data-view="downloads">
         <header class="view__header">
           <h1 class="view__title">Downloads</h1>
+          <button class="btn-ghost btn-ghost--sm" id="clear-paused" type="button" hidden>
+            Clear paused
+          </button>
         </header>
 
         <!-- Toolbar: search + status filter pills + density toggle -->
@@ -279,6 +282,11 @@
             </label>
 
             <label class="field__check">
+              <input id="set-clipboard-watcher" type="checkbox" />
+              <span>Suggest downloads copied to the clipboard while the app is focused</span>
+            </label>
+
+            <label class="field__check">
               <input id="set-notifications-enabled" type="checkbox" />
               <span>Show a desktop notification when a download completes</span>
             </label>
@@ -353,14 +361,14 @@
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
         <h2 class="modal__title" id="add-modal-title">Add Download</h2>
         <form id="add-form" class="modal__form">
-          <input
+          <textarea
             id="url-input"
             class="input"
-            type="url"
-            placeholder="Paste a download URL…"
+            placeholder="Paste one or more download URLs (one per line)…"
             autocomplete="off"
             required
-          />
+            rows="4"
+          ></textarea>
           <div class="field">
             <label class="field__label" for="filename-input">Filename (optional)</label>
             <input
